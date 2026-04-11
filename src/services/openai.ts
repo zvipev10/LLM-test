@@ -5,29 +5,32 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-const EXTRACTION_PROMPT = `You are an invoice data extraction assistant.
-Analyze the provided invoice image and extract the following information:
-- vendorName: the name of the company or person issuing the invoice
-- date: the invoice date in ISO format (YYYY-MM-DD)
-- totalWithVat: the total amount including VAT/tax as a number
-- totalWithoutVat: the total amount excluding VAT/tax as a number
-- currency: the 3-letter currency code (e.g. USD, EUR, GBP)
+const EXTRACTION_PROMPT = `You are an invoice and receipt data extraction assistant.
+Analyze the provided image and extract the following information:
+- vendorName: the name of the company or person issuing the invoice/receipt
+- date: the date of the invoice/receipt in ISO format (YYYY-MM-DD). Look carefully for dates in any format including DD/MM/YY, MM/DD/YY, YY/MM/DD, or written out. A 2-digit year like 26 means 2026.
+- totalWithVat: the final total amount paid including VAT/tax as a number
+- totalWithoutVat: the amount before VAT/tax as a number
+- currency: the 3-letter currency code (e.g. USD, EUR, GBP, ILS for Israeli Shekel)
 - confidence: your confidence in the extraction (high/medium/low)
 
 Rules:
+- Search the ENTIRE image carefully for dates, including headers, footers and small print
 - If a field cannot be found, return null for that field
 - Return ONLY a valid JSON object, no explanation or markdown
 - Numbers should be plain numbers, not strings (e.g. 100.50 not "100.50")
+- For receipts in Hebrew, the date may appear near the bottom with the time
 
 Example output:
 {
   "vendorName": "Acme Corp",
-  "date": "2024-01-15",
-  "totalWithVat": 121.00,
-  "totalWithoutVat": 100.00,
-  "currency": "USD",
+  "date": "2026-04-08",
+  "totalWithVat": 426.40,
+  "totalWithoutVat": 361.36,
+  "currency": "ILS",
   "confidence": "high"
 }`;
+
 
 export async function extractInvoiceData(
   fileBuffer: Buffer,
