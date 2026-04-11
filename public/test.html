@@ -248,7 +248,7 @@
         </div>
         <div class="field">
           <span class="field-name">Total with VAT</span>
-          <span class="field-value">${d.totalWithVat !== null ? d.currency + ' ' + d.totalWithVat : '<span class="null-value">not found</span>'}</span>
+          <span class="field-value">${d.totalWithVat !== null ? (d.currency && d.currency !== 'null' ? d.currency + ' ' : '') + d.totalWithVat : '<span class="null-value">not found</span>'}</span>
         </div>
         <div class="field">
           <span class="field-name">Total without VAT</span>
