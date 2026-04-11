@@ -14,6 +14,18 @@ export interface InvoiceResponse {
   data: InvoiceData;
 }
 
+export interface MultiUploadResponse {
+  success: boolean;
+  total: number;
+  results: (InvoiceResponse | FailedFileResponse)[];
+}
+
+export interface FailedFileResponse {
+  success: false;
+  filename: string;
+  error: string;
+}
+
 export interface ErrorResponse {
   success: false;
   error: string;
