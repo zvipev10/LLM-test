@@ -1,0 +1,20 @@
+export interface InvoiceData {
+  vendorName: string | null;
+  date: string | null;
+  totalWithVat: number | null;
+  totalWithoutVat: number | null;
+  currency: string | null;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface InvoiceResponse {
+  success: boolean;
+  filename: string;
+  mimeType: string;
+  data: InvoiceData;
+}
+
+export interface ErrorResponse {
+  success: false;
+  error: string;
+}
