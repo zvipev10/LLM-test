@@ -7,7 +7,8 @@ const client = new OpenAI({
 
 const EXTRACTION_PROMPT = `You are an invoice and receipt data extraction assistant.
 Analyze the provided image and extract the following information:
-- vendorName: the name of the company or person issuing the invoice/receipt
+- vendorName: copy the exact business name as it appears on the document, do NOT infer or guess. If the top line is a document type (like "חשבונית"), use the line below it.
+
 - date: the date of the invoice/receipt in ISO format (YYYY-MM-DD). Look carefully for dates in any format including DD/MM/YY, MM/DD/YY, YY/MM/DD, or written out. A 2-digit year like 26 means 2026.
 - totalWithVat: the final total amount paid including VAT/tax as a number
 - totalWithoutVat: the amount before VAT/tax as a number
