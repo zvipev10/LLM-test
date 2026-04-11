@@ -12,17 +12,8 @@
       padding: 24px 16px;
       min-height: 100vh;
     }
-    h1 {
-      font-size: 22px;
-      font-weight: 700;
-      margin-bottom: 6px;
-      color: #1c1c1e;
-    }
-    p.subtitle {
-      font-size: 14px;
-      color: #6e6e73;
-      margin-bottom: 24px;
-    }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; color: #1c1c1e; }
+    p.subtitle { font-size: 14px; color: #6e6e73; margin-bottom: 24px; }
     .card {
       background: white;
       border-radius: 16px;
@@ -56,27 +47,18 @@
       cursor: pointer;
       transition: border-color 0.2s;
     }
-    .file-area.has-file {
-      border-color: #34c759;
-      background: #f0fff4;
-    }
+    .file-area.has-file { border-color: #34c759; background: #f0fff4; }
     .file-area input { display: none; }
     .file-icon { font-size: 36px; margin-bottom: 8px; }
-    .file-label {
-      font-size: 15px;
-      font-weight: 600;
-      color: #007aff;
-      margin-bottom: 4px;
-    }
-    .file-hint {
+    .file-label { font-size: 15px; font-weight: 600; color: #007aff; margin-bottom: 4px; }
+    .file-hint { font-size: 13px; color: #8e8e93; }
+    .file-list { margin-top: 12px; text-align: left; }
+    .file-item {
       font-size: 13px;
-      color: #8e8e93;
-    }
-    .file-name {
-      font-size: 14px;
       color: #34c759;
       font-weight: 600;
-      margin-top: 8px;
+      padding: 4px 0;
+      border-bottom: 1px solid #f0fff4;
     }
     button {
       width: 100%;
@@ -88,32 +70,33 @@
       font-size: 17px;
       font-weight: 600;
       cursor: pointer;
-      transition: opacity 0.2s;
     }
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .spinner {
-      display: none;
-      text-align: center;
-      padding: 16px;
-      color: #8e8e93;
-      font-size: 15px;
-    }
-    .result {
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .spinner { display: none; text-align: center; padding: 16px; color: #8e8e93; font-size: 15px; }
+    .summary {
       display: none;
       background: white;
       border-radius: 16px;
       padding: 20px;
+      margin-bottom: 16px;
       box-shadow: 0 1px 4px rgba(0,0,0,0.08);
     }
-    .result.success { border-left: 4px solid #34c759; }
-    .result.error { border-left: 4px solid #ff3b30; }
-    .result h2 {
-      font-size: 16px;
-      font-weight: 700;
+    .summary h2 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .summary p { font-size: 14px; color: #6e6e73; }
+    .result-card {
+      background: white;
+      border-radius: 16px;
+      padding: 20px;
       margin-bottom: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .result-card.success { border-left: 4px solid #34c759; }
+    .result-card.error { border-left: 4px solid #ff3b30; }
+    .result-filename {
+      font-size: 13px;
+      color: #8e8e93;
+      margin-bottom: 12px;
+      font-weight: 500;
     }
     .field {
       display: flex;
@@ -136,21 +119,14 @@
     .high { background: #d4edda; color: #155724; }
     .medium { background: #fff3cd; color: #856404; }
     .low { background: #f8d7da; color: #721c24; }
-    pre {
-      font-size: 12px;
-      background: #f2f2f7;
-      padding: 12px;
-      border-radius: 8px;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
+    .error-msg { font-size: 14px; color: #ff3b30; }
+    pre { font-size: 12px; background: #f2f2f7; padding: 12px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
   </style>
 </head>
 <body>
 
   <h1>Invoice Processor</h1>
-  <p class="subtitle">Upload an invoice to extract data using AI</p>
+  <p class="subtitle">Upload one or more invoices to extract data using AI</p>
 
   <div class="card">
     <label>API URL</label>
@@ -159,27 +135,35 @@
   </div>
 
   <div class="card">
-    <label>Invoice File</label>
+    <label>Invoice Files</label>
     <div class="file-area" id="fileArea" onclick="document.getElementById('fileInput').click()">
-      <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.webp" onchange="handleFile(this)" />
+      <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.webp"
+        multiple onchange="handleFiles(this)" />
       <div class="file-icon">📄</div>
-      <div class="file-label">Tap to choose file</div>
-      <div class="file-hint">PDF, JPG, PNG or WEBP · Max 10MB</div>
-      <div class="file-name" id="fileName"></div>
+      <div class="file-label">Tap to choose files</div>
+      <div class="file-hint">PDF, JPG, PNG or WEBP · Max 10MB each · Up to 20 files</div>
+      <div class="file-list" id="fileList"></div>
     </div>
   </div>
 
   <button id="sendBtn" onclick="sendRequest()" disabled>Upload & Extract</button>
 
-  <div class="spinner" id="spinner">⏳ Processing invoice...</div>
+  <div class="spinner" id="spinner">⏳ Processing invoices...</div>
 
-  <div class="result" id="result"></div>
+  <div class="summary" id="summary"></div>
+
+  <div id="results"></div>
 
   <script>
-    function handleFile(input) {
-      const file = input.files[0];
-      if (!file) return;
-      document.getElementById('fileName').textContent = '✓ ' + file.name;
+    function handleFiles(input) {
+      const files = Array.from(input.files);
+      if (!files.length) return;
+
+      const list = document.getElementById('fileList');
+      list.innerHTML = files.map(f =>
+        `<div class="file-item">✓ ${f.name}</div>`
+      ).join('');
+
       document.getElementById('fileArea').classList.add('has-file');
       document.getElementById('sendBtn').disabled = false;
     }
@@ -187,91 +171,98 @@
     async function sendRequest() {
       const url = document.getElementById('apiUrl').value.trim();
       const fileInput = document.getElementById('fileInput');
-      const file = fileInput.files[0];
-
-      if (!url || !file) return;
+      const files = Array.from(fileInput.files);
+      if (!url || !files.length) return;
 
       document.getElementById('sendBtn').disabled = true;
       document.getElementById('spinner').style.display = 'block';
-      document.getElementById('result').style.display = 'none';
+      document.getElementById('summary').style.display = 'none';
+      document.getElementById('results').innerHTML = '';
 
       try {
         const formData = new FormData();
-        formData.append('invoice', file);
+        files.forEach(file => formData.append('invoices', file));
 
-        const response = await fetch(url, {
-          method: 'POST',
-          body: formData
-        });
-
+        const response = await fetch(url, { method: 'POST', body: formData });
         const data = await response.json();
-        showResult(data, response.ok);
 
+        showResults(data);
       } catch (err) {
-        showError(err.message);
+        document.getElementById('results').innerHTML = `
+          <div class="result-card error">
+            <h2>❌ Network Error</h2>
+            <pre>${err.message}</pre>
+          </div>`;
       } finally {
         document.getElementById('spinner').style.display = 'none';
         document.getElementById('sendBtn').disabled = false;
       }
     }
 
-    function showResult(data, success) {
-      const el = document.getElementById('result');
-      el.style.display = 'block';
-
-      if (!success || !data.success) {
-        el.className = 'result error';
-        el.innerHTML = `
-          <h2>❌ Error</h2>
-          <pre>${JSON.stringify(data, null, 2)}</pre>
-        `;
+    function showResults(data) {
+      if (!data.success) {
+        document.getElementById('results').innerHTML = `
+          <div class="result-card error">
+            <h2>❌ Error</h2>
+            <pre>${JSON.stringify(data, null, 2)}</pre>
+          </div>`;
         return;
       }
 
-      const d = data.data;
-      const fmt = (v) => v !== null && v !== undefined
-        ? v
-        : '<span class="null-value">not found</span>';
+      const succeeded = data.results.filter(r => r.success).length;
+      const failed = data.results.filter(r => !r.success).length;
 
-      const conf = d.confidence || 'low';
-
-      el.className = 'result success';
-      el.innerHTML = `
-        <h2>✅ Extracted Successfully</h2>
-        <div class="field">
-          <span class="field-name">Vendor</span>
-          <span class="field-value">${fmt(d.vendorName)}</span>
-        </div>
-        <div class="field">
-          <span class="field-name">Date</span>
-          <span class="field-value">${fmt(d.date)}</span>
-        </div>
-        <div class="field">
-          <span class="field-name">Total with VAT</span>
-          <span class="field-value">${d.totalWithVat !== null ? (d.currency && d.currency !== 'null' ? d.currency + ' ' : '') + d.totalWithVat : '<span class="null-value">not found</span>'}</span>
-        </div>
-        <div class="field">
-          <span class="field-name">Total without VAT</span>
-          <span class="field-value">${d.totalWithoutVat !== null ? d.currency + ' ' + d.totalWithoutVat : '<span class="null-value">not found</span>'}</span>
-        </div>
-        <div class="field">
-          <span class="field-name">Currency</span>
-          <span class="field-value">${fmt(d.currency)}</span>
-        </div>
-        <div class="field">
-          <span class="field-name">Confidence</span>
-          <span class="field-value">
-            <span class="confidence ${conf}">${conf}</span>
-          </span>
-        </div>
+      const summary = document.getElementById('summary');
+      summary.style.display = 'block';
+      summary.innerHTML = `
+        <h2>✅ Processed ${data.total} file${data.total > 1 ? 's' : ''}</h2>
+        <p>${succeeded} succeeded${failed > 0 ? ` · ${failed} failed` : ''}</p>
       `;
-    }
 
-    function showError(msg) {
-      const el = document.getElementById('result');
-      el.style.display = 'block';
-      el.className = 'result error';
-      el.innerHTML = `<h2>❌ Network Error</h2><pre>${msg}</pre>`;
+      document.getElementById('results').innerHTML = data.results.map(r => {
+        if (!r.success) {
+          return `
+            <div class="result-card error">
+              <div class="result-filename">📄 ${r.filename}</div>
+              <p class="error-msg">❌ ${r.error}</p>
+            </div>`;
+        }
+
+        const d = r.data;
+        const conf = d.confidence || 'low';
+        const fmt = (v) => v !== null && v !== undefined
+          ? v : '<span class="null-value">not found</span>';
+        const fmtAmount = (v, currency) => v !== null
+          ? (currency && currency !== 'null' ? currency + ' ' : '') + v
+          : '<span class="null-value">not found</span>';
+
+        return `
+          <div class="result-card success">
+            <div class="result-filename">📄 ${r.filename}</div>
+            <div class="field">
+              <span class="field-name">Vendor</span>
+              <span class="field-value">${fmt(d.vendorName)}</span>
+            </div>
+            <div class="field">
+              <span class="field-name">Date</span>
+              <span class="field-value">${fmt(d.date)}</span>
+            </div>
+            <div class="field">
+              <span class="field-name">Total with VAT</span>
+              <span class="field-value">${fmtAmount(d.totalWithVat, d.currency)}</span>
+            </div>
+            <div class="field">
+              <span class="field-name">Total without VAT</span>
+              <span class="field-value">${fmtAmount(d.totalWithoutVat, d.currency)}</span>
+            </div>
+            <div class="field">
+              <span class="field-name">Confidence</span>
+              <span class="field-value">
+                <span class="confidence ${conf}">${conf}</span>
+              </span>
+            </div>
+          </div>`;
+      }).join('');
     }
   </script>
 
