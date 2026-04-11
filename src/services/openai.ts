@@ -6,7 +6,7 @@ Analyze the provided image and extract the following information:
 - totalWithoutVat: the amount before VAT/tax as a number
 - currency: the 3-letter currency code (e.g. USD, EUR, GBP, ILS for Israeli Shekel)
 - confidence: your confidence in the extraction (high/medium/low)
-
+ 
 Rules:
 - Copy text EXACTLY as it appears on the document — never infer or hallucinate values
 - Hebrew text is right-to-left (RTL). Always return Hebrew text in correct RTL reading order. Never reverse Hebrew characters or words.
