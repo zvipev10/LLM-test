@@ -8,41 +8,57 @@ export const invoiceRouter = Router();
 
 invoiceRouter.post(
   '/upload',
-  upload.single('invoice'),
+  upload.array('invoices', 20),
   async (req: Request, res: Response) => {
     try {
-      if (!req.file) {
+      if (!req.files || req.files.length === 0) {
         return res.status(400).json({
           success: false,
-          error: 'No file uploaded. Send a file with field name "invoice"'
+          error: 'No files uploaded. Send files with field name "invoices"'
         } as ErrorResponse);
       }
 
-      const { buffer, mimetype, originalname } = req.file;
+      const files = req.files as Express.Multer.File[];
 
-      // If PDF, convert to image first
-      let imageBuffer = buffer;
-      let imageMimeType = mimetype;
+      const results = await Promise.all(
+        files.map(async (file) => {
+          try {
+            const { buffer, mimetype, originalname } = file;
 
-      if (mimetype === 'application/pdf') {
-        imageBuffer = await convertPdfToImage(buffer);
-        imageMimeType = 'image/png';
-      }
+            let imageBuffer = buffer;
+            let imageMimeType = mimetype;
 
-      // Extract invoice data using GPT-4o
-      const invoiceData = await extractInvoiceData(imageBuffer, imageMimeType);
+            if (mimetype === 'application/pdf') {
+              imageBuffer = await convertPdfToImage(buffer);
+              imageMimeType = 'image/png';
+            }
 
-      const response: InvoiceResponse = {
+            const invoiceData = await extractInvoiceData(imageBuffer, imageMimeType);
+
+            return {
+              success: true,
+              filename: originalname,
+              mimeType: mimetype,
+              data: invoiceData
+            } as InvoiceResponse;
+
+          } catch (err) {
+            return {
+              success: false,
+              filename: file.originalname,
+              error: err instanceof Error ? err.message : 'Failed to process file'
+            };
+          }
+        })
+      );
+
+      return res.status(200).json({
         success: true,
-        filename: originalname,
-        mimeType: mimetype,
-        data: invoiceData
-      };
-
-      return res.status(200).json(response);
+        total: files.length,
+        results
+      });
 
     } catch (error) {
-      console.error('Invoice processing error:', error);
       return res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error occurred'
