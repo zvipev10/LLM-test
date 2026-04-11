@@ -1,10 +1,3 @@
-import OpenAI from 'openai';
-import { InvoiceData } from '../types/invoice';
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
 const EXTRACTION_PROMPT = `You are an invoice and receipt data extraction assistant.
 Analyze the provided image and extract the following information:
 - vendorName: the exact business name as it appears printed on the document. Do NOT infer, guess or expand the name. If the first line is a document type (e.g. "חשבונית", "Invoice", "Receipt"), use the next line as the vendor name instead.
@@ -16,6 +9,7 @@ Analyze the provided image and extract the following information:
 
 Rules:
 - Copy text EXACTLY as it appears on the document — never infer or hallucinate values
+- Hebrew text is right-to-left (RTL). Always return Hebrew text in correct RTL reading order. Never reverse Hebrew characters or words.
 - Search the ENTIRE image carefully for dates, including headers, footers and small print
 - If a field cannot be found, return null for that field
 - Return ONLY a valid JSON object, no explanation or markdown
@@ -32,36 +26,3 @@ Example output:
   "currency": "ILS",
   "confidence": "high"
 }`;
-
-export async function extractInvoiceData(
-  fileBuffer: Buffer,
-  mimeType: string
-): Promise<InvoiceData> {
-  const base64File = fileBuffer.toString('base64');
-  const imageUrl = `data:${mimeType};base64,${base64File}`;
-
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image_url',
-            image_url: { url: imageUrl }
-          },
-          {
-            type: 'text',
-            text: EXTRACTION_PROMPT
-          }
-        ]
-      }
-    ],
-    max_tokens: 500,
-    temperature: 0
-  });
-
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error('No response from OpenAI');
-
-  const cleaned = content.replace(/```json|```/g, '').trim​​​​​​​​​​​​​​​​
