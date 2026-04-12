@@ -26,5 +26,5 @@ export async function convertPdfToImage(
     throw new Error(`PDF conversion produced invalid image data (header: ${got})`);
   }
 
-  return result.buffer;
+  return Buffer.from(result.buffer);
 }
