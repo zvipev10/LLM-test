@@ -22,7 +22,7 @@ Rules:
 - Return ONLY a valid JSON object, no explanation or markdown
 - Numbers should be plain numbers, not strings (e.g. 100.50 not "100.50")
 - For receipts in Hebrew, the date may appear near the top or bottom with the time
-- If there are multiple dates, use the invoice issue date not the print date or any of transaction dates
+- If there are multiple dates, use the invoice date not the print date or any of transaction dates
 - If there is no two separate total with and without VAT, return the total amount for totalWithVat and calculate totalWithoutVat by removing a standard VAT percentage of 18%
 - The first line of a document is often its TYPE (invoice/receipt), not the vendor name
 
