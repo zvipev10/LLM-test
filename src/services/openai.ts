@@ -25,7 +25,6 @@ Rules:
 - If there are multiple dates, use the invoice date or "תאריך החשבונית". Not the print date or any of transaction dates
 - The date must be copied character-by-character exactly as it appears next to the label "תאריך החשבונית"
 - Do not reformat, reorder, or reinterpret the date
-- If the extracted date is not identical to a substring in the document, return null
 - If there is no two separate total with and without VAT, return the total amount for totalWithVat and calculate totalWithoutVat by removing a standard VAT percentage of 18%
 - The first line of a document is often its TYPE (invoice/receipt), not the vendor name
 
