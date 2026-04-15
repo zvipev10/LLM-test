@@ -16,7 +16,8 @@ STAGE 2 — classify each number value in the result of first stage into one of 
 - total_without_vat: if not explicitly stated, calculate from total_with_vat using 18% VAT
 - vat_amount: if not explicitly stated, calculate as total_with_vat - total_without_vat
 - date: best fit for the invoice date (not due date, not payment date, etc.). Convert to ISO format (YYYY-MM-DD)
-
+- currency: if not explicitly stated, assume it's ILS
+- confidence
 Return ONLY:
 
 {
