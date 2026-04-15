@@ -7,106 +7,15 @@ const client = new OpenAI({
 
 const EXTRACTION_PROMPT = `You are an invoice and receipt data extraction assistant.
 
-You must follow a STRICT 3-stage process internally and only output the final JSON.
+STAGE 1 — go through the attached file, row by row and explain in your words what you understand from it. maximum information without skipping any piece of data (dates and numbers values)
 
-----------------------------------------
-STAGE 1 — EXTRACT ALL NUMERIC VALUES
-----------------------------------------
+STAGE 2 — classify each number value in the result of first stage into one of the following:
 
-Extract ALL monetary values from the document.
-
-For each value, create an object with:
-- rawText: exact text as appears
-- numericValue: number
-- currency: detected currency (e.g. ILS)
-- contextText: exact nearby text (same line or closest label)
-
-----------------------------------------
-STAGE 2 — CLASSIFY EACH VALUE
-----------------------------------------
-
-For each extracted value, assign:
-
-- type: one of:
-  [total_with_vat, total_without_vat, vat_amount, unit_price, line_item, subtotal, other, unknown]
-
-- isFinalCandidate: true/false
-
-Classification rules:
-
-- total_with_vat:
-  MUST appear near labels like:
-  "סה\"כ", "סה\"כ לתשלום", "לתשלום", "סה\"כ חשבונית"
-
-- total_without_vat:
-  MUST appear near:
-  "לפני מע\"מ"
-
-- vat_amount:
-  MUST appear near:
-  "מע\"מ"
-
-- unit_price:
-  MUST be associated with units like:
-  "לליטר", "למ\"ק", "ליחידה"
-
-- line_item:
-  itemized charges (gas, שירות, תשלום קבוע וכו')
-
-- If unsure → type = unknown (DO NOT GUESS)
-
-isFinalCandidate = true ONLY IF:
-- type is total_with_vat or total_without_vat
-AND
-- context clearly indicates a payment summary
-
-----------------------------------------
-STAGE 3 — SELECT FINAL VALUES
-----------------------------------------
-
-Selection rules:
-
-- totalWithVat:
-  Choose the value where:
-  type = total_with_vat
-  AND isFinalCandidate = true
-
-- If multiple candidates:
-  choose the one with the highest numericValue
-
-- totalWithoutVat:
-  Prefer value with type = total_without_vat and isFinalCandidate = true
-
-- If not found:
-  calculate from totalWithVat using 18% VAT
-
-STRICT EXCLUSIONS:
-- NEVER use values classified as:
-  unit_price, line_item, subtotal
-
-- NEVER use a value unless its rawText EXACTLY appears in the document
-
-----------------------------------------
-DATE RULES
-----------------------------------------
-
-- Extract only the date labeled:
-  "תאריך החשבונית"
-
-- Ignore all other dates (meter readings, deposits, etc.)
-
-- Convert to ISO format (YYYY-MM-DD)
-
-----------------------------------------
-VENDOR NAME
-----------------------------------------
-
-- Use exact printed name
-- If first line is document type, use next line
-
-----------------------------------------
-OUTPUT
-----------------------------------------
+- vendorName
+- total_with_vat
+- total_without_vat: if not explicitly stated, calculate from total_with_vat using 18% VAT
+- vat_amount: if not explicitly stated, calculate as total_with_vat - total_without_vat
+- date: best fit for the invoice date (not due date, not payment date, etc.). Convert to ISO format (YYYY-MM-DD)
 
 Return ONLY:
 
@@ -119,16 +28,7 @@ Return ONLY:
   "confidence": "high | medium | low"
 }
 
-----------------------------------------
-VALIDATION (MANDATORY)
-----------------------------------------
-
-Before finalizing:
-- Ensure selected totals appear near "סה\"כ" or payment labels
-- Ensure they are NOT unit prices
-- Ensure they are among the largest values in the document
-
-If any rule is violated → return null for that field`;
+If any value is not found or cannot be confidently extracted → return null for that field`;
 
 export async function extractInvoiceData(
   fileBuffer: Buffer,
