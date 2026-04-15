@@ -62,8 +62,26 @@ export async function extractInvoiceData(
   if (!content) throw new Error('No response from OpenAI');
 
   const cleaned = content.replace(/```json|```/g, '').trim();
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON found in response');
   
-  return JSON.parse(jsonMatch[0]) as InvoiceData;
+  // Find the first { and try to extract JSON from there
+  const startIndex = cleaned.indexOf('{');
+  if (startIndex === -1) throw new Error('No JSON found in response');
+  
+  // Try to find matching closing brace
+  let braceCount = 0;
+  let endIndex = -1;
+  
+  for (let i = startIndex; i < cleaned.length; i++) {
+    if (cleaned[i] === '{') braceCount++;
+    if (cleaned[i] === '}') braceCount--;
+    if (braceCount === 0) {
+      endIndex = i;
+      break;
+    }
+  }
+  
+  if (endIndex === -1) throw new Error('Invalid JSON structure in response');
+  
+  const jsonString = cleaned.substring(startIndex, endIndex + 1);
+  return JSON.parse(jsonString) as InvoiceData;
 }
