@@ -63,25 +63,29 @@ export async function extractInvoiceData(
 
   const cleaned = content.replace(/```json|```/g, '').trim();
   
-  // Find the first { and try to extract JSON from there
-  const startIndex = cleaned.indexOf('{');
-  if (startIndex === -1) throw new Error('No JSON found in response');
+  // Try multiple strategies to extract JSON
+  let jsonString = null;
   
-  // Try to find matching closing brace
-  let braceCount = 0;
-  let endIndex = -1;
-  
-  for (let i = startIndex; i < cleaned.length; i++) {
-    if (cleaned[i] === '{') braceCount++;
-    if (cleaned[i] === '}') braceCount--;
-    if (braceCount === 0) {
-      endIndex = i;
-      break;
+  // Strategy 1: Look for pattern with required fields
+  const jsonPattern = /\{\s*"vendorName"\s*:[^}]*"confidence"\s*:[^}]*\}/s;
+  const match = cleaned.match(jsonPattern);
+  if (match) {
+    jsonString = match[0];
+  } else {
+    // Strategy 2: Find first { and last }
+    const startIndex = cleaned.indexOf('{');
+    const endIndex = cleaned.lastIndexOf('}');
+    
+    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+      jsonString = cleaned.substring(startIndex, endIndex + 1);
     }
   }
   
-  if (endIndex === -1) throw new Error('Invalid JSON structure in response');
+  if (!jsonString) throw new Error('No JSON structure found in response');
   
-  const jsonString = cleaned.substring(startIndex, endIndex + 1);
-  return JSON.parse(jsonString) as InvoiceData;
+  try {
+    return JSON.parse(jsonString) as InvoiceData;
+  } catch (parseError) {
+    throw new Error(`Failed to parse JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}. Content: ${jsonString.substring(0, 100)}`);
+  }
 }
