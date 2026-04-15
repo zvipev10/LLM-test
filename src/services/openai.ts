@@ -63,5 +63,8 @@ export async function extractInvoiceData(
   if (!content) throw new Error('No response from OpenAI');
 
   const cleaned = content.replace(/```json|```/g, '').trim();
-  return JSON.parse(cleaned) as InvoiceData;
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('No JSON found in response');
+  
+  return JSON.parse(jsonMatch[0]) as InvoiceData;
 }
