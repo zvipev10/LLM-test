@@ -26,11 +26,11 @@ export function saveInvoice(invoice: StoredInvoice): number {
 
   const result = stmt.run(
     invoice.fileName,
-    invoice.vendorName || null,
-    invoice.date || null,
-    invoice.totalWithVat || null,
-    invoice.totalWithoutVat || null,
-    invoice.vat || null,
+    invoice.vendorName ?? null,
+    invoice.date ?? null,
+    invoice.totalWithVat !== null && invoice.totalWithVat !== undefined ? invoice.totalWithVat : null,
+    invoice.totalWithoutVat !== null && invoice.totalWithoutVat !== undefined ? invoice.totalWithoutVat : null,
+    invoice.vat !== null && invoice.vat !== undefined ? invoice.vat : null,
     invoice.currency || 'ILS',
     invoice.confidence || null,
     'processed'
