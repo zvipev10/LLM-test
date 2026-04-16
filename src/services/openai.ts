@@ -5,9 +5,12 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-const EXTRACTION_PROMPT = `You are an invoice and receipt data extraction assistant. Extract data from the invoice.
+const EXTRACTION_PROMPT = `You are an invoice and receipt data extraction assistant.
 
-Classify each number value into one of the following:
+STAGE 1 — go through the attached file, row by row and explain in your words what you understand from it. maximum information without skipping any piece of data (dates and numbers values)
+
+STAGE 2 — classify each number value in the result of first stage into one of the following:
+
 - vendor name: best guess for the vendor name. if not explicitly stated, try to extract it from the document (e.g. from the header, from the logo, etc.). if logically cannot be extracted, return null
 - total with vat
 - total without vat: if not explicitly stated, calculate from total_with_vat using 18% VAT. if logically cannot be extracted or calculated, return the same value as total_with_vat (assuming the invoice might be VAT-free)
@@ -34,7 +37,7 @@ export async function extractInvoiceData(
   const imageUrl = `data:${mimeType};base64,${base64File}`;
 
   const response = await client.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-5.4',
     messages: [
       {
         role: 'user',
