@@ -1,18 +1,35 @@
 import db from './db';
 import { InvoiceData } from '../types/invoice';
 
+const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB in bytes
+
 export interface StoredInvoice extends InvoiceData {
   id?: number;
   fileName: string;
+  mimeType?: string;
   vat?: number;
   status?: string;
   createdAt?: string;
 }
 
-export function saveInvoice(invoice: StoredInvoice): number {
+export interface InvoiceWithFile extends StoredInvoice {
+  fileData?: string; // Base64 encoded file data
+}
+
+export function saveInvoice(invoice: InvoiceWithFile): number {
+  // Validate file size if fileData is provided
+  if (invoice.fileData) {
+    const fileSizeInBytes = Buffer.byteLength(invoice.fileData, 'utf8');
+    if (fileSizeInBytes > MAX_FILE_SIZE) {
+      throw new Error(`File size exceeds 2MB limit. Current size: ${(fileSizeInBytes / 1024 / 1024).toFixed(2)}MB`);
+    }
+  }
+
   const stmt = db.prepare(`
     INSERT INTO invoices (
       fileName,
+      mimeType,
+      fileData,
       vendorName,
       date,
       totalWithVat,
@@ -21,11 +38,13 @@ export function saveInvoice(invoice: StoredInvoice): number {
       currency,
       confidence,
       status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = stmt.run(
     invoice.fileName,
+    invoice.mimeType || null,
+    invoice.fileData || null,
     invoice.vendorName ?? null,
     invoice.date ?? null,
     invoice.totalWithVat !== null && invoice.totalWithVat !== undefined ? invoice.totalWithVat : null,
@@ -39,7 +58,7 @@ export function saveInvoice(invoice: StoredInvoice): number {
   return result.lastInsertRowid as number;
 }
 
-export function saveBatch(invoices: StoredInvoice[]): number[] {
+export function saveBatch(invoices: InvoiceWithFile[]): number[] {
   const ids: number[] = [];
   
   for (const invoice of invoices) {
@@ -63,7 +82,7 @@ export function getInvoices(options?: {
   dateFrom?: string;
   dateTo?: string;
 }): StoredInvoice[] {
-  let query = 'SELECT * FROM invoices WHERE 1=1';
+  let query = 'SELECT id, fileName, mimeType, vendorName, date, totalWithVat, totalWithoutVat, vat, currency, confidence, status, createdAt FROM invoices WHERE 1=1';
   const params: (string | number)[] = [];
 
   if (options?.vendorName) {
@@ -100,6 +119,18 @@ export function getInvoices(options?: {
 export function getInvoiceById(id: number): StoredInvoice | undefined {
   const stmt = db.prepare('SELECT * FROM invoices WHERE id = ?');
   return stmt.get(id) as StoredInvoice | undefined;
+}
+
+export function getInvoiceFileData(id: number): { fileData: string; mimeType: string } | null {
+  const stmt = db.prepare('SELECT fileData, mimeType FROM invoices WHERE id = ?');
+  const result = stmt.get(id) as any;
+  if (result && result.fileData) {
+    return {
+      fileData: result.fileData,
+      mimeType: result.mimeType || 'application/octet-stream'
+    };
+  }
+  return null;
 }
 
 export function updateInvoice(id: number, updates: Partial<StoredInvoice>): boolean {

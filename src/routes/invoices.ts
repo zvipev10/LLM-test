@@ -3,7 +3,7 @@ import { upload } from '../middleware/upload';
 import { extractInvoiceData } from '../services/openai';
 import { convertPdfToImage } from '../services/pdf';
 import { InvoiceResponse, ErrorResponse } from '../types/invoice';
-import { saveInvoice, getInvoices, getInvoiceStats, clearAllInvoices, saveBatch } from '../database/invoiceService';
+import { saveInvoice, getInvoices, getInvoiceStats, clearAllInvoices, saveBatch, getInvoiceFileData } from '../database/invoiceService';
 
 export const invoiceRouter = Router();
 
@@ -36,13 +36,16 @@ invoiceRouter.post(
 
             const invoiceData = await extractInvoiceData(imageBuffer, imageMimeType);
 
-            // Return extracted data WITHOUT saving to DB
+            // Return extracted data WITHOUT saving to DB, but include base64 of original file
+            const base64File = buffer.toString('base64');
+
             return {
               success: true,
               filename: originalname,
               mimeType: mimetype,
-              data: invoiceData
-            } as InvoiceResponse;
+              data: invoiceData,
+              fileData: base64File
+            } as InvoiceResponse & { fileData: string };
 
           } catch (err) {
             return {
@@ -113,6 +116,36 @@ invoiceRouter.get('/list', (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to retrieve invoices'
+    });
+  }
+});
+
+// Get file data for an invoice
+invoiceRouter.get('/file/:id', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const invoiceId = parseInt(id);
+
+    if (isNaN(invoiceId)) {
+      return res.status(400).json({ success: false, error: 'Invalid invoice ID' });
+    }
+
+    const fileData = getInvoiceFileData(invoiceId);
+
+    if (!fileData) {
+      return res.status(404).json({ success: false, error: 'File not found' });
+    }
+
+    // Convert base64 to buffer
+    const buffer = Buffer.from(fileData.fileData, 'base64');
+
+    res.set('Content-Type', fileData.mimeType);
+    res.set('Content-Disposition', 'inline');
+    res.send(buffer);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to retrieve file'
     });
   }
 });

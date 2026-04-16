@@ -16,6 +16,8 @@ export function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS invoices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       fileName TEXT NOT NULL,
+      mimeType TEXT,
+      fileData BLOB,
       vendorName TEXT,
       date TEXT,
       totalWithVat REAL,
