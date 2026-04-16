@@ -13,7 +13,7 @@ STAGE 2 — classify each number value in the result of first stage into one of 
 
 - vendor name: best guess for the vendor name. if not explicitly stated, try to extract it from the document (e.g. from the header, from the logo, etc.). if logically cannot be extracted, return null
 - total with vat
-- total without vat: if not explicitly stated, calculate from total_with_vat using 18% VAT. if logicalky cannot be extracted or calculated, return 0
+- total without vat: if not explicitly stated, calculate from total_with_vat using 18% VAT. if logicalky cannot be extracted or calculated, return the same value as total_with_vat (assuming the invoice might be VAT-free)
 - date: best fit for the invoice date (not due date, not payment date, etc.). Convert to ISO format (YYYY-MM-DD)
 - currency: if not explicitly stated, assume it's ILS
 - confidence
