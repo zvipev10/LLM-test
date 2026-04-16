@@ -1,7 +1,7 @@
 import db from './db';
 import { InvoiceData } from '../types/invoice';
 
-const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB in bytes
+const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB in bytes
 
 export interface StoredInvoice extends InvoiceData {
   id?: number;
@@ -16,12 +16,13 @@ export interface InvoiceWithFile extends StoredInvoice {
   fileData?: string; // Base64 encoded file data
 }
 
-export function saveInvoice(invoice: InvoiceWithFile): number {
+export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number {
   // Validate file size if fileData is provided
   if (invoice.fileData) {
     const fileSizeInBytes = Buffer.byteLength(invoice.fileData, 'utf8');
     if (fileSizeInBytes > MAX_FILE_SIZE) {
-      throw new Error(`File size exceeds 2MB limit. Current size: ${(fileSizeInBytes / 1024 / 1024).toFixed(2)}MB`);
+      const rowInfo = rowIndex !== undefined ? ` (Row ${rowIndex + 1})` : '';
+      throw new Error(`File size exceeds 4MB limit${rowInfo}. File: ${invoice.fileName}. Current size: ${(fileSizeInBytes / 1024 / 1024).toFixed(2)}MB`);
     }
     console.log(`[DB] Saving invoice ${invoice.fileName} with fileData (${(fileSizeInBytes / 1024).toFixed(2)}KB)`);
   } else {
@@ -67,8 +68,8 @@ export function saveInvoice(invoice: InvoiceWithFile): number {
 export function saveBatch(invoices: InvoiceWithFile[]): number[] {
   const ids: number[] = [];
   
-  for (const invoice of invoices) {
-    const id = saveInvoice(invoice);
+  for (let idx = 0; idx < invoices.length; idx++) {
+    const id = saveInvoice(invoices[idx], idx);
     ids.push(id);
   }
   
