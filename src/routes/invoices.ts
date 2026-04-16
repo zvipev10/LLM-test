@@ -84,9 +84,19 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
       });
     }
 
+    // Log fileData status for debugging
+    console.log(`[SAVE] Received ${invoices.length} invoices`);
+    invoices.forEach((inv, idx) => {
+      const hasFileData = !!inv.fileData;
+      const fileDataLength = hasFileData ? (typeof inv.fileData === 'string' ? inv.fileData.length : 'unknown') : 0;
+      console.log(`[SAVE] Invoice ${idx}: fileName=${inv.fileName}, hasFileData=${hasFileData}, fileDataLength=${fileDataLength}, mimeType=${inv.mimeType}`);
+    });
+
     // Clear all existing invoices and save new ones
     clearAllInvoices();
     const ids = saveBatch(invoices);
+
+    console.log(`[SAVE] Successfully saved ${ids.length} invoices to database`);
 
     return res.status(200).json({
       success: true,
@@ -132,17 +142,24 @@ invoiceRouter.get('/file/:id', (req: Request, res: Response) => {
 
     const fileData = getInvoiceFileData(invoiceId);
 
-    if (!fileData) {
-      return res.status(404).json({ success: false, error: 'File not found' });
+    if (!fileData || !fileData.fileData) {
+      console.error(`File not found for invoice ${invoiceId}`);
+      return res.status(404).json({ success: false, error: 'File not found or no file data stored' });
     }
 
-    // Convert base64 to buffer
-    const buffer = Buffer.from(fileData.fileData, 'base64');
-
-    res.set('Content-Type', fileData.mimeType);
-    res.set('Content-Disposition', 'inline');
-    res.send(buffer);
+    try {
+      // Convert base64 to buffer
+      const buffer = Buffer.from(fileData.fileData, 'base64');
+      
+      res.set('Content-Type', fileData.mimeType);
+      res.set('Content-Disposition', 'inline');
+      res.send(buffer);
+    } catch (conversionErr) {
+      console.error(`Failed to convert base64 for invoice ${invoiceId}:`, conversionErr);
+      return res.status(500).json({ success: false, error: 'Failed to process file data' });
+    }
   } catch (error) {
+    console.error('File retrieval error:', error);
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to retrieve file'

@@ -23,6 +23,9 @@ export function saveInvoice(invoice: InvoiceWithFile): number {
     if (fileSizeInBytes > MAX_FILE_SIZE) {
       throw new Error(`File size exceeds 2MB limit. Current size: ${(fileSizeInBytes / 1024 / 1024).toFixed(2)}MB`);
     }
+    console.log(`[DB] Saving invoice ${invoice.fileName} with fileData (${(fileSizeInBytes / 1024).toFixed(2)}KB)`);
+  } else {
+    console.log(`[DB] Saving invoice ${invoice.fileName} without fileData`);
   }
 
   const stmt = db.prepare(`
@@ -55,7 +58,10 @@ export function saveInvoice(invoice: InvoiceWithFile): number {
     'processed'
   );
 
-  return result.lastInsertRowid as number;
+  const insertedId = result.lastInsertRowid as number;
+  console.log(`[DB] Inserted invoice with ID ${insertedId}`);
+
+  return insertedId;
 }
 
 export function saveBatch(invoices: InvoiceWithFile[]): number[] {
@@ -124,12 +130,21 @@ export function getInvoiceById(id: number): StoredInvoice | undefined {
 export function getInvoiceFileData(id: number): { fileData: string; mimeType: string } | null {
   const stmt = db.prepare('SELECT fileData, mimeType FROM invoices WHERE id = ?');
   const result = stmt.get(id) as any;
+  console.log(`[DB] getInvoiceFileData(${id}):`, { hasResult: !!result, hasFileData: !!result?.fileData, fileDataType: typeof result?.fileData });
+  
   if (result && result.fileData) {
+    let fileDataStr = result.fileData;
+    // SQLite returns BLOB data as Buffer
+    if (Buffer.isBuffer(fileDataStr)) {
+      fileDataStr = fileDataStr.toString('base64');
+      console.log(`[DB] Converted Buffer to base64, length: ${fileDataStr.length}`);
+    }
     return {
-      fileData: result.fileData,
+      fileData: fileDataStr,
       mimeType: result.mimeType || 'application/octet-stream'
     };
   }
+  console.log(`[DB] No file data found for invoice ${id}`);
   return null;
 }
 
