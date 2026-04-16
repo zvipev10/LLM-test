@@ -92,21 +92,31 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
       console.log(`[SAVE] Invoice ${idx}: fileName=${inv.fileName}, hasFileData=${hasFileData}, fileDataLength=${fileDataLength}, mimeType=${inv.mimeType}`);
     });
 
-    // Clear all existing invoices and save new ones
-    clearAllInvoices();
-    const ids = saveBatch(invoices);
+    try {
+      // Clear all existing invoices and save new ones
+      console.log('[SAVE] Clearing existing invoices...');
+      clearAllInvoices();
+      
+      console.log('[SAVE] Saving batch of invoices...');
+      const ids = saveBatch(invoices);
+      
+      console.log(`[SAVE] Successfully saved ${ids.length} invoices to database`);
 
-    console.log(`[SAVE] Successfully saved ${ids.length} invoices to database`);
-
-    return res.status(200).json({
-      success: true,
-      message: `Database updated with ${ids.length} invoices`,
-      savedCount: ids.length
-    });
+      return res.status(200).json({
+        success: true,
+        message: `Database updated with ${ids.length} invoices`,
+        savedCount: ids.length
+      });
+    } catch (dbError) {
+      console.error('[SAVE] Database operation failed:', dbError);
+      throw dbError;
+    }
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('[SAVE] Save batch failed:', errorMessage, error);
     return res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to save invoices'
+      error: errorMessage
     });
   }
 });
