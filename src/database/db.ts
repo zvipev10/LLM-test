@@ -2,13 +2,22 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-const dbPath = path.join(process.cwd(), 'invoices.db');
+// Use persistent volume path on Railway, fallback to current directory for local dev
+const dataDir = '/app/data';
+const dbPath = path.join(dataDir, 'invoices.db');
+
+// Create data directory if it doesn't exist (for local development)
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
 
 // Create or access database
 const db = new Database(dbPath);
 
 // Enable foreign keys
 db.pragma('foreign_keys = ON');
+
+console.log(`📦 Database initialized at: ${dbPath}`);
 
 // Initialize schema
 export function initializeDatabase() {
