@@ -1,0 +1,12 @@
+[build]
+builder = "nixpacks"
+
+[build.nixpacks]
+providers = ["nodejs"]
+
+[deploy]
+startCommand = "npm run start"
+
+[[volumes]]
+sourceDir = "data"
+mountPath = "/app/data"
