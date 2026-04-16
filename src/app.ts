@@ -3,8 +3,12 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { invoiceRouter } from './routes/invoices';
+import { initializeDatabase } from './database/db';
 
 dotenv.config();
+
+// Initialize SQLite database
+initializeDatabase();
 
 const app = express();
 const PORT = process.env.PORT || 8080;
