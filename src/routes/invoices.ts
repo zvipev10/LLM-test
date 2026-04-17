@@ -3,7 +3,7 @@ import { upload } from '../middleware/upload';
 import { extractInvoiceData } from '../services/openai';
 import { convertPdfToImage } from '../services/pdf';
 import { InvoiceResponse, ErrorResponse } from '../types/invoice';
-import { saveInvoice, getInvoices, getInvoiceStats, clearAllInvoices, saveBatch, getInvoiceFileData } from '../database/invoiceService';
+import { getInvoices, getInvoiceStats, syncInvoices, getInvoiceFileData } from '../database/invoiceService';
 
 export const invoiceRouter = Router();
 
@@ -35,8 +35,6 @@ invoiceRouter.post(
             }
 
             const invoiceData = await extractInvoiceData(imageBuffer, imageMimeType);
-
-            // Return extracted data WITHOUT saving to DB, but include base64 of original file
             const base64File = buffer.toString('base64');
 
             return {
@@ -46,7 +44,6 @@ invoiceRouter.post(
               data: invoiceData,
               fileData: base64File
             } as InvoiceResponse & { fileData: string };
-
           } catch (err) {
             return {
               success: false,
@@ -62,7 +59,6 @@ invoiceRouter.post(
         total: files.length,
         results
       });
-
     } catch (error) {
       return res.status(500).json({
         success: false,
@@ -72,11 +68,10 @@ invoiceRouter.post(
   }
 );
 
-// Save all current invoices to database (clears old data first)
 invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
   try {
     const { invoices } = req.body;
-    
+
     if (!Array.isArray(invoices) || invoices.length === 0) {
       return res.status(400).json({
         success: false,
@@ -84,23 +79,18 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
       });
     }
 
-    // Log fileData status for debugging
     console.log(`[SAVE] Received ${invoices.length} invoices`);
     invoices.forEach((inv, idx) => {
       const hasFileData = !!inv.fileData;
       const fileDataLength = hasFileData ? (typeof inv.fileData === 'string' ? inv.fileData.length : 'unknown') : 0;
-      console.log(`[SAVE] Invoice ${idx}: fileName=${inv.fileName}, hasFileData=${hasFileData}, fileDataLength=${fileDataLength}, mimeType=${inv.mimeType}`);
+      console.log(`[SAVE] Invoice ${idx}: id=${inv.id ?? 'new'}, fileName=${inv.fileName}, hasFileData=${hasFileData}, fileDataLength=${fileDataLength}, mimeType=${inv.mimeType}`);
     });
 
     try {
-      // Clear all existing invoices and save new ones
-      console.log('[SAVE] Clearing existing invoices...');
-      clearAllInvoices();
-      
-      console.log('[SAVE] Saving batch of invoices...');
-      const ids = saveBatch(invoices);
-      
-      console.log(`[SAVE] Successfully saved ${ids.length} invoices to database`);
+      console.log('[SAVE] Syncing invoices with database snapshot...');
+      const ids = syncInvoices(invoices);
+
+      console.log(`[SAVE] Successfully synced ${ids.length} invoices to database`);
 
       return res.status(200).json({
         success: true,
@@ -121,12 +111,11 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
   }
 });
 
-// Get all invoices from database
 invoiceRouter.get('/list', (req: Request, res: Response) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
     const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
-    
+
     const invoices = getInvoices({ limit, offset });
     return res.status(200).json({
       success: true,
@@ -140,7 +129,6 @@ invoiceRouter.get('/list', (req: Request, res: Response) => {
   }
 });
 
-// Get file data for an invoice
 invoiceRouter.get('/file/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -158,9 +146,8 @@ invoiceRouter.get('/file/:id', (req: Request, res: Response) => {
     }
 
     try {
-      // Convert base64 to buffer
       const buffer = Buffer.from(fileData.fileData, 'base64');
-      
+
       res.set('Content-Type', fileData.mimeType);
       res.set('Content-Disposition', 'inline');
       res.send(buffer);
@@ -177,7 +164,6 @@ invoiceRouter.get('/file/:id', (req: Request, res: Response) => {
   }
 });
 
-// Get invoice statistics
 invoiceRouter.get('/stats', (req: Request, res: Response) => {
   try {
     const stats = getInvoiceStats();
