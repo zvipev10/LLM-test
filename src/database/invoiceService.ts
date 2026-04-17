@@ -1,7 +1,7 @@
 import db from './db';
 import { InvoiceData } from '../types/invoice';
 
-const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB in bytes
+const MAX_FILE_SIZE = 6 * 1024 * 1024; // 6MB in bytes
 
 export interface StoredInvoice extends InvoiceData {
   id?: number;
@@ -22,7 +22,7 @@ function validateFileData(invoice: InvoiceWithFile, rowIndex?: number) {
   const fileSizeInBytes = Buffer.byteLength(invoice.fileData, 'utf8');
   if (fileSizeInBytes > MAX_FILE_SIZE) {
     const rowInfo = rowIndex !== undefined ? ` (Row ${rowIndex + 1})` : '';
-    throw new Error(`File size exceeds 4MB limit${rowInfo}. File: ${invoice.fileName}. Current size: ${(fileSizeInBytes / 1024 / 1024).toFixed(2)}MB`);
+    throw new Error(`File size exceeds 6MB limit${rowInfo}. File: ${invoice.fileName}. Current size: ${(fileSizeInBytes / 1024 / 1024).toFixed(2)}MB`);
   }
 }
 
