@@ -16,14 +16,21 @@ export interface InvoiceWithFile extends StoredInvoice {
   fileData?: string; // Base64 encoded file data
 }
 
+function validateFileData(invoice: InvoiceWithFile, rowIndex?: number) {
+  if (!invoice.fileData) return;
+
+  const fileSizeInBytes = Buffer.byteLength(invoice.fileData, 'utf8');
+  if (fileSizeInBytes > MAX_FILE_SIZE) {
+    const rowInfo = rowIndex !== undefined ? ` (Row ${rowIndex + 1})` : '';
+    throw new Error(`File size exceeds 4MB limit${rowInfo}. File: ${invoice.fileName}. Current size: ${(fileSizeInBytes / 1024 / 1024).toFixed(2)}MB`);
+  }
+}
+
 export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number {
-  // Validate file size if fileData is provided
+  validateFileData(invoice, rowIndex);
+
   if (invoice.fileData) {
     const fileSizeInBytes = Buffer.byteLength(invoice.fileData, 'utf8');
-    if (fileSizeInBytes > MAX_FILE_SIZE) {
-      const rowInfo = rowIndex !== undefined ? ` (Row ${rowIndex + 1})` : '';
-      throw new Error(`File size exceeds 4MB limit${rowInfo}. File: ${invoice.fileName}. Current size: ${(fileSizeInBytes / 1024 / 1024).toFixed(2)}MB`);
-    }
     console.log(`[DB] Saving invoice ${invoice.fileName} with fileData (${(fileSizeInBytes / 1024).toFixed(2)}KB)`);
   } else {
     console.log(`[DB] Saving invoice ${invoice.fileName} without fileData`);
@@ -67,13 +74,89 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
 
 export function saveBatch(invoices: InvoiceWithFile[]): number[] {
   const ids: number[] = [];
-  
+
   for (let idx = 0; idx < invoices.length; idx++) {
     const id = saveInvoice(invoices[idx], idx);
     ids.push(id);
   }
-  
+
   return ids;
+}
+
+export function syncInvoices(invoices: InvoiceWithFile[]): number[] {
+  const sync = db.transaction((incomingInvoices: InvoiceWithFile[]) => {
+    const ids: number[] = [];
+    const incomingExistingIds = new Set<number>();
+
+    const selectExistingStmt = db.prepare('SELECT id, fileData, mimeType FROM invoices WHERE id = ?');
+    const updateStmt = db.prepare(`
+      UPDATE invoices
+      SET
+        fileName = ?,
+        mimeType = ?,
+        fileData = ?,
+        vendorName = ?,
+        date = ?,
+        totalWithVat = ?,
+        totalWithoutVat = ?,
+        vat = ?,
+        currency = ?,
+        confidence = ?,
+        status = ?,
+        updatedAt = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    const selectAllIdsStmt = db.prepare('SELECT id FROM invoices');
+    const deleteStmt = db.prepare('DELETE FROM invoices WHERE id = ?');
+
+    incomingInvoices.forEach((invoice, idx) => {
+      validateFileData(invoice, idx);
+
+      if (invoice.id) {
+        const existing = selectExistingStmt.get(invoice.id) as { id: number; fileData: string | Buffer | null; mimeType: string | null } | undefined;
+
+        if (!existing) {
+          throw new Error(`Invoice with ID ${invoice.id} does not exist`);
+        }
+
+        const resolvedFileData = invoice.fileData ?? existing.fileData ?? null;
+        const resolvedMimeType = invoice.mimeType ?? existing.mimeType ?? null;
+
+        updateStmt.run(
+          invoice.fileName,
+          resolvedMimeType,
+          resolvedFileData,
+          invoice.vendorName ?? null,
+          invoice.date ?? null,
+          invoice.totalWithVat !== null && invoice.totalWithVat !== undefined ? invoice.totalWithVat : null,
+          invoice.totalWithoutVat !== null && invoice.totalWithoutVat !== undefined ? invoice.totalWithoutVat : null,
+          invoice.vat !== null && invoice.vat !== undefined ? invoice.vat : null,
+          invoice.currency || 'ILS',
+          invoice.confidence || null,
+          invoice.status || 'processed',
+          invoice.id
+        );
+
+        incomingExistingIds.add(invoice.id);
+        ids.push(invoice.id);
+        return;
+      }
+
+      const newId = saveInvoice(invoice, idx);
+      ids.push(newId);
+    });
+
+    const existingRows = selectAllIdsStmt.all() as { id: number }[];
+    existingRows.forEach(({ id }) => {
+      if (!incomingExistingIds.has(id) && !ids.includes(id)) {
+        deleteStmt.run(id);
+      }
+    });
+
+    return ids;
+  });
+
+  return sync(invoices);
 }
 
 export function clearAllInvoices(): number {
@@ -132,10 +215,9 @@ export function getInvoiceFileData(id: number): { fileData: string; mimeType: st
   const stmt = db.prepare('SELECT fileData, mimeType FROM invoices WHERE id = ?');
   const result = stmt.get(id) as any;
   console.log(`[DB] getInvoiceFileData(${id}):`, { hasResult: !!result, hasFileData: !!result?.fileData, fileDataType: typeof result?.fileData });
-  
+
   if (result && result.fileData) {
     let fileDataStr = result.fileData;
-    // SQLite returns BLOB data as Buffer
     if (Buffer.isBuffer(fileDataStr)) {
       fileDataStr = fileDataStr.toString('base64');
       console.log(`[DB] Converted Buffer to base64, length: ${fileDataStr.length}`);
