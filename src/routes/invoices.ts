@@ -72,7 +72,7 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
   try {
     const { invoices } = req.body;
 
-    if (!Array.isArray(invoices) || invoices.length === 0) {
+    if (!Array.isArray(invoices)) {
       return res.status(400).json({
         success: false,
         error: 'Invalid invoices data'
