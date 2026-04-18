@@ -24,7 +24,7 @@ export async function handleOAuthCallback(code: string) {
   oAuth2Client.setCredentials(tokens)
 }
 
-function getClient() {
+export function getGmailClient() {
   if (!tokens) {
     throw new Error('Gmail not connected')
   }
@@ -58,7 +58,7 @@ function collectAttachments(parts: any[] | undefined): any[] {
 }
 
 export async function fetchEmails() {
-  const gmail = getClient()
+  const gmail = getGmailClient()
 
   const listRes = await gmail.users.messages.list({
     userId: 'me',
