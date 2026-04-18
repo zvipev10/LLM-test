@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import db from '../database/db';
-import { getAuthUrl, handleOAuthCallback, fetchEmails } from '../services/gmailService';
-import { google } from 'googleapis';
+import { getAuthUrl, handleOAuthCallback, fetchEmails, getGmailClient } from '../services/gmailService';
 
 export const gmailRouter = Router();
 
@@ -21,7 +20,6 @@ gmailRouter.get('/callback', async (req, res) => {
   }
 });
 
-// sync -> flatten into file rows
 gmailRouter.post('/sync', async (req, res) => {
   try {
     const emails = await fetchEmails();
@@ -82,7 +80,7 @@ gmailRouter.post('/sync', async (req, res) => {
   }
 });
 
-// file endpoint
+// FIXED AUTH
 gmailRouter.get('/file/:id', async (req, res) => {
   const row = db.prepare('SELECT * FROM gmail_staging WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).send('Not found');
@@ -94,26 +92,26 @@ gmailRouter.get('/file/:id', async (req, res) => {
   }
 
   try {
-    const gmail = google.gmail({ version: 'v1' });
+    const gmail = getGmailClient();
+
     const attachment = await gmail.users.messages.attachments.get({
       userId: 'me',
       messageId: row.gmailMessageId,
       id: row.gmailAttachmentId
     });
 
-    const data = attachment.data.data;
-    const buffer = Buffer.from(data, 'base64');
+    const buffer = Buffer.from(attachment.data.data, 'base64');
 
     res.setHeader('Content-Type', row.mimeType || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename="${row.fileName}"`);
     res.send(buffer);
 
   } catch (err) {
+    console.error(err);
     res.status(500).send('Failed to fetch attachment');
   }
 });
 
-// results -> now flat rows
 gmailRouter.get('/results', (req, res) => {
   const rows = db.prepare('SELECT * FROM gmail_staging ORDER BY createdAt DESC').all();
   res.json({ success: true, results: rows });
