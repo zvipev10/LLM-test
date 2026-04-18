@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import db from '../database/db';
-import { getAuthUrl, handleOAuthCallback, fetchEmails, getGmailClient } from '../services/gmailService';
+import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, createSimplePdfBuffer } from '../services/gmailService';
+import { extractInvoiceData } from '../services/openai';
+import { convertPdfToImage } from '../services/pdf';
 
 export const gmailRouter = Router();
 
 gmailRouter.get('/connect', (req, res) => {
-  const url = getAuthUrl();
-  res.redirect(url);
+  res.redirect(getAuthUrl());
 });
 
 gmailRouter.get('/callback', async (req, res) => {
@@ -24,95 +24,71 @@ gmailRouter.post('/sync', async (req, res) => {
   try {
     const emails = await fetchEmails();
 
-    db.prepare('DELETE FROM gmail_staging').run();
+    const results: any[] = [];
 
-    const insert = db.prepare(`
-      INSERT INTO gmail_staging (
-        gmailMessageId, threadId, fromAddress, subject, snippet, receivedAt,
-        hasAttachments, attachmentNames, fileName, mimeType, gmailAttachmentId, sourceType
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    let count = 0;
-
-    emails.forEach(email => {
+    for (const email of emails) {
       if (email.attachments.length > 0) {
-        email.attachments.forEach((att: any) => {
-          insert.run(
-            email.gmailMessageId,
-            email.threadId,
-            email.fromAddress,
-            email.subject,
-            email.snippet,
-            new Date(email.receivedAt).toISOString(),
-            1,
-            JSON.stringify([att.fileName]),
-            att.fileName,
-            att.mimeType,
-            att.attachmentId,
-            'attachment'
-          );
-          count++;
-        });
-      } else {
-        insert.run(
-          email.gmailMessageId,
-          email.threadId,
-          email.fromAddress,
-          email.subject,
-          email.snippet,
-          new Date(email.receivedAt).toISOString(),
-          0,
-          '[]',
-          `${email.subject || 'mail'}.pdf`,
-          'application/pdf',
-          null,
-          'generated'
-        );
-        count++;
-      }
-    });
+        for (const att of email.attachments) {
+          try {
+            const buffer = await downloadAttachment(email.gmailMessageId, att.attachmentId);
 
-    res.json({ success: true, count });
+            let imageBuffer = buffer;
+            if (att.mimeType === 'application/pdf') {
+              imageBuffer = await convertPdfToImage(buffer);
+            }
+
+            const data = await extractInvoiceData(imageBuffer, 'image/png');
+
+            results.push({
+              success: true,
+              filename: att.fileName,
+              mimeType: att.mimeType,
+              data,
+              source: 'gmail'
+            });
+          } catch (err: any) {
+            results.push({
+              success: false,
+              filename: att.fileName,
+              error: err.message
+            });
+          }
+        }
+      } else {
+        try {
+          const pdf = createSimplePdfBuffer([
+            `Subject: ${email.subject}`,
+            `From: ${email.fromAddress}`,
+            email.snippet
+          ]);
+
+          const imageBuffer = await convertPdfToImage(pdf);
+          const data = await extractInvoiceData(imageBuffer, 'image/png');
+
+          results.push({
+            success: true,
+            filename: `${email.subject || 'mail'}.pdf`,
+            mimeType: 'application/pdf',
+            data,
+            source: 'gmail'
+          });
+        } catch (err: any) {
+          results.push({
+            success: false,
+            filename: `${email.subject || 'mail'}.pdf`,
+            error: err.message
+          });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      total: results.length,
+      results
+    });
 
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
-
-// FIXED AUTH
-gmailRouter.get('/file/:id', async (req, res) => {
-  const row = db.prepare('SELECT * FROM gmail_staging WHERE id = ?').get(req.params.id);
-  if (!row) return res.status(404).send('Not found');
-
-  if (row.sourceType === 'generated') {
-    const content = `Subject: ${row.subject}\nFrom: ${row.fromAddress}\n\n${row.snippet}`;
-    res.setHeader('Content-Type', 'application/pdf');
-    return res.send(Buffer.from(content));
-  }
-
-  try {
-    const gmail = getGmailClient();
-
-    const attachment = await gmail.users.messages.attachments.get({
-      userId: 'me',
-      messageId: row.gmailMessageId,
-      id: row.gmailAttachmentId
-    });
-
-    const buffer = Buffer.from(attachment.data.data, 'base64');
-
-    res.setHeader('Content-Type', row.mimeType || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${row.fileName}"`);
-    res.send(buffer);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Failed to fetch attachment');
-  }
-});
-
-gmailRouter.get('/results', (req, res) => {
-  const rows = db.prepare('SELECT * FROM gmail_staging ORDER BY createdAt DESC').all();
-  res.json({ success: true, results: rows });
 });
