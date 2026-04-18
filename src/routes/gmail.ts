@@ -4,20 +4,36 @@ import { getAuthUrl, handleOAuthCallback, fetchEmails } from '../services/gmailS
 
 export const gmailRouter = Router();
 
-// connect
 gmailRouter.get('/connect', (req, res) => {
   const url = getAuthUrl();
   res.redirect(url);
 });
 
-// callback
 gmailRouter.get('/callback', async (req, res) => {
   try {
     const code = req.query.code as string;
+
+    if (!code) {
+      return res.status(400).send('Missing OAuth code');
+    }
+
     await handleOAuthCallback(code);
     res.send('Gmail connected successfully');
-  } catch (err) {
-    res.status(500).send('OAuth failed');
+  } catch (err: any) {
+    console.error('Gmail OAuth callback failed:', err);
+
+    const envDebug = {
+      hasClientId: !!process.env.GOOGLE_CLIENT_ID,
+      hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+      redirectUri: process.env.GOOGLE_REDIRECT_URI || null,
+    };
+
+    const errorMessage = err?.message || 'Unknown OAuth error';
+    const details = err?.response?.data ? JSON.stringify(err.response.data) : '';
+
+    res.status(500).send(
+      `OAuth failed\n\nmessage: ${errorMessage}\n\ndetails: ${details}\n\nenv: ${JSON.stringify(envDebug, null, 2)}`
+    );
   }
 });
 
@@ -35,7 +51,6 @@ function classify(subject: string, attachments: string[]) {
   return { category: 'other', isRelevant: 0, confidence: 'low', reason: 'not relevant' };
 }
 
-// real sync
 gmailRouter.post('/sync', async (req, res) => {
   try {
     const emails = await fetchEmails();
@@ -78,7 +93,6 @@ gmailRouter.post('/sync', async (req, res) => {
   }
 });
 
-// results
 gmailRouter.get('/results', (req, res) => {
   const rows = db.prepare('SELECT * FROM gmail_staging ORDER BY createdAt DESC').all();
   res.json({ success: true, results: rows });
