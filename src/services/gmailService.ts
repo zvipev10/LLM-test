@@ -36,18 +36,20 @@ function extractHeader(headers: any[] | undefined, name: string) {
   return headers?.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || ''
 }
 
-function collectAttachments(parts: any[] | undefined): string[] {
+function collectAttachments(parts: any[] | undefined): any[] {
   if (!parts) return []
-  const result: string[] = []
+  const result: any[] = []
 
   const walk = (items: any[]) => {
     items.forEach((part) => {
-      if (part.filename) {
-        result.push(part.filename)
+      if (part.filename && part.body?.attachmentId) {
+        result.push({
+          fileName: part.filename,
+          mimeType: part.mimeType,
+          attachmentId: part.body.attachmentId
+        })
       }
-      if (part.parts) {
-        walk(part.parts)
-      }
+      if (part.parts) walk(part.parts)
     })
   }
 
@@ -60,7 +62,7 @@ export async function fetchEmails() {
 
   const listRes = await gmail.users.messages.list({
     userId: 'me',
-    q: process.env.GMAIL_QUERY || 'newer_than:30d has:attachment',
+    q: process.env.GMAIL_QUERY || 'label:Heshbonit',
     maxResults: 20
   })
 
