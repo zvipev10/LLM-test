@@ -33,42 +33,42 @@ export async function extractInvoiceData(
   fileBuffer: Buffer,
   mimeType: string
 ): Promise<InvoiceData> {
-  const base64File = fileBuffer.toString('base64');
-  const imageUrl = `data:${mimeType};base64,${base64File}`;
+  if (!mimeType.startsWith('image/')) {
+    throw new Error(`Invalid MIME type after preprocessing: ${mimeType}`);
+  }
 
-  const response = await client.chat.completions.create({
+  const base64File = fileBuffer.toString('base64');
+  const dataUrl = `data:${mimeType};base64,${base64File}`;
+
+  const response = await client.responses.create({
     model: 'gpt-5.4',
-    messages: [
+    input: [
       {
         role: 'user',
         content: [
           {
-            type: 'image_url',
-            image_url: { url: imageUrl }
+            type: 'input_image',
+            image_url: dataUrl,
           },
           {
-            type: 'text',
-            text: EXTRACTION_PROMPT
+            type: 'input_text',
+            text: EXTRACTION_PROMPT,
           }
         ]
       }
     ],
-    max_completion_tokens: 500,
-    temperature: 0
+    max_output_tokens: 500,
+    temperature: 0,
   });
 
-  const content = response.choices[0]?.message?.content;
+  const content = response.output_text;
   if (!content) throw new Error('No response from OpenAI');
 
-  // Clean up markdown code blocks if present
   const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-  
+
   try {
-    // Parse directly - should be pure JSON
-    const parsed = JSON.parse(cleaned);
-    return parsed as InvoiceData;
+    return JSON.parse(cleaned) as InvoiceData;
   } catch (parseError) {
-    // If direct parse fails, try to extract JSON object from response
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
