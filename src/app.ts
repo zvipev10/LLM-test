@@ -3,11 +3,11 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { invoiceRouter } from './routes/invoices';
+import { gmailRouter } from './routes/gmail';
 import { initializeDatabase } from './database/db';
 
 dotenv.config();
 
-// Initialize SQLite database
 initializeDatabase();
 
 const app = express();
@@ -23,6 +23,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/invoices', invoiceRouter);
+app.use('/api/gmail', gmailRouter);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
