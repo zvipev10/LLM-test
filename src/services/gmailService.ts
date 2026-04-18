@@ -51,23 +51,38 @@ function collectAttachments(parts: any[] | undefined): any[] {
   return result
 }
 
+async function getExactLabelId(labelName: string): Promise<string | null> {
+  const gmail = getGmailClient()
+  const labelsRes = await gmail.users.labels.list({ userId: 'me' })
+  const labels = labelsRes.data.labels || []
+  const match = labels.find((label) => label.name === labelName)
+  return match?.id || null
+}
+
 export async function fetchEmails() {
   const gmail = getGmailClient()
+  const exactLabelName = process.env.GMAIL_LABEL_NAME || 'Heshbonit'
+  const exactLabelId = await getExactLabelId(exactLabelName)
+
+  if (!exactLabelId) {
+    return []
+  }
 
   const listRes = await gmail.users.messages.list({
     userId: 'me',
-    q: process.env.GMAIL_QUERY || 'label:Heshbonit',
+    q: `label:${exactLabelName}`,
     maxResults: 20
   })
 
   const messages = listRes.data.messages || []
 
-  return Promise.all(messages.map(async (msg) => {
+  const fullMessages = await Promise.all(messages.map(async (msg) => {
     const full = await gmail.users.messages.get({ userId: 'me', id: msg.id!, format: 'full' })
 
     const payload = full.data.payload
     const headers = payload?.headers || []
     const attachments = collectAttachments(payload?.parts)
+    const labelIds = full.data.labelIds || []
 
     return {
       gmailMessageId: full.data.id || '',
@@ -75,9 +90,12 @@ export async function fetchEmails() {
       fromAddress: extractHeader(headers, 'From'),
       receivedAt: extractHeader(headers, 'Date'),
       snippet: full.data.snippet || '',
-      attachments
+      attachments,
+      labelIds
     }
   }))
+
+  return fullMessages.filter((message) => message.labelIds.includes(exactLabelId))
 }
 
 export async function downloadAttachment(messageId: string, attachmentId: string): Promise<Buffer> {
