@@ -13,7 +13,15 @@ gmailRouter.get('/callback', async (req, res) => {
   try {
     const code = req.query.code as string;
     if (!code) return res.status(400).send('Missing OAuth code');
+
     await handleOAuthCallback(code);
+
+    const returnUrl = process.env.GMAIL_RETURN_URL;
+    if (returnUrl) {
+      const separator = returnUrl.includes('?') ? '&' : '?';
+      return res.redirect(`${returnUrl}${separator}gmail_connected=1`);
+    }
+
     res.send('Gmail connected successfully');
   } catch (err: any) {
     res.status(500).send(err.message);
@@ -92,6 +100,9 @@ gmailRouter.post('/sync', async (req, res) => {
       results
     });
   } catch (err: any) {
+    if (err?.message === 'Gmail not connected') {
+      return res.status(401).json({ success: false, error: 'Gmail not connected' });
+    }
     res.status(500).json({ success: false, error: err.message });
   }
 });
