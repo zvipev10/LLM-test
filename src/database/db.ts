@@ -15,6 +15,14 @@ db.pragma('foreign_keys = ON');
 
 console.log(`📦 Database initialized at: ${dbPath}`);
 
+function ensureColumn(tableName: string, columnName: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
+  const exists = columns.some((column) => column.name === columnName);
+  if (!exists) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+}
+
 export function initializeDatabase() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS invoices (
@@ -53,6 +61,11 @@ export function initializeDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_gmail_message ON gmail_staging(gmailMessageId);
   `);
+
+  ensureColumn('gmail_staging', 'gmailAttachmentId', 'TEXT');
+  ensureColumn('gmail_staging', 'fileName', 'TEXT');
+  ensureColumn('gmail_staging', 'mimeType', 'TEXT');
+  ensureColumn('gmail_staging', 'sourceType', 'TEXT DEFAULT "attachment"');
 }
 
 export default db;
