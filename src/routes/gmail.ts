@@ -23,27 +23,30 @@ gmailRouter.get('/callback', async (req, res) => {
 gmailRouter.post('/sync', async (req, res) => {
   try {
     const emails = await fetchEmails();
-
     const results: any[] = [];
 
     for (const email of emails) {
       if (email.attachments.length > 0) {
         for (const att of email.attachments) {
           try {
-            const buffer = await downloadAttachment(email.gmailMessageId, att.attachmentId);
+            const originalBuffer = await downloadAttachment(email.gmailMessageId, att.attachmentId);
 
-            let imageBuffer = buffer;
+            let imageBuffer = originalBuffer;
+            let imageMimeType = att.mimeType;
+
             if (att.mimeType === 'application/pdf') {
-              imageBuffer = await convertPdfToImage(buffer);
+              imageBuffer = await convertPdfToImage(originalBuffer);
+              imageMimeType = 'image/png';
             }
 
-            const data = await extractInvoiceData(imageBuffer, 'image/png');
+            const data = await extractInvoiceData(imageBuffer, imageMimeType);
 
             results.push({
               success: true,
               filename: att.fileName,
               mimeType: att.mimeType,
               data,
+              fileData: originalBuffer.toString('base64'),
               source: 'gmail'
             });
           } catch (err: any) {
@@ -56,13 +59,13 @@ gmailRouter.post('/sync', async (req, res) => {
         }
       } else {
         try {
-          const pdf = createSimplePdfBuffer([
+          const pdfBuffer = createSimplePdfBuffer([
             `Subject: ${email.subject}`,
             `From: ${email.fromAddress}`,
             email.snippet
           ]);
 
-          const imageBuffer = await convertPdfToImage(pdf);
+          const imageBuffer = await convertPdfToImage(pdfBuffer);
           const data = await extractInvoiceData(imageBuffer, 'image/png');
 
           results.push({
@@ -70,6 +73,7 @@ gmailRouter.post('/sync', async (req, res) => {
             filename: `${email.subject || 'mail'}.pdf`,
             mimeType: 'application/pdf',
             data,
+            fileData: pdfBuffer.toString('base64'),
             source: 'gmail'
           });
         } catch (err: any) {
@@ -87,7 +91,6 @@ gmailRouter.post('/sync', async (req, res) => {
       total: results.length,
       results
     });
-
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
