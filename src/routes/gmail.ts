@@ -1,53 +1,46 @@
 import { Router } from 'express';
 import db from '../database/db';
+import { getAuthUrl, handleOAuthCallback, fetchEmails } from '../services/gmailService';
 
 export const gmailRouter = Router();
 
-// simple heuristic classifier
-function classify(subject: string, snippet: string, attachments: string[]) {
-  const text = (subject + ' ' + snippet + ' ' + attachments.join(' ')).toLowerCase();
+// connect
+gmailRouter.get('/connect', (req, res) => {
+  const url = getAuthUrl();
+  res.redirect(url);
+});
 
-  if (text.includes('invoice') || text.includes('חשבונית') || text.includes('receipt') || text.includes('קבלה')) {
-    return { category: 'invoice_attachment', isRelevant: 1, confidence: 'high', reason: 'Detected invoice keywords' };
+// callback
+gmailRouter.get('/callback', async (req, res) => {
+  try {
+    const code = req.query.code as string;
+    await handleOAuthCallback(code);
+    res.send('Gmail connected successfully');
+  } catch (err) {
+    res.status(500).send('OAuth failed');
+  }
+});
+
+function classify(subject: string, attachments: string[]) {
+  const text = (subject + ' ' + attachments.join(' ')).toLowerCase();
+
+  if (text.includes('invoice') || text.includes('חשבונית')) {
+    return { category: 'invoice', isRelevant: 1, confidence: 'high', reason: 'invoice detected' };
   }
 
-  if (text.includes('order') || text.includes('payment') || text.includes('תשלום')) {
-    return { category: 'purchase', isRelevant: 1, confidence: 'medium', reason: 'Purchase-related content' };
+  if (text.includes('order') || text.includes('payment')) {
+    return { category: 'purchase', isRelevant: 1, confidence: 'medium', reason: 'purchase detected' };
   }
 
-  return { category: 'other', isRelevant: 0, confidence: 'low', reason: 'No relevant signals' };
+  return { category: 'other', isRelevant: 0, confidence: 'low', reason: 'not relevant' };
 }
 
-// MOCK / MVP sync (no OAuth yet)
+// real sync
 gmailRouter.post('/sync', async (req, res) => {
   try {
-    // TODO: replace with real Gmail API later
-    const mockEmails = [
-      {
-        gmailMessageId: '1',
-        threadId: 't1',
-        fromAddress: 'billing@amazon.com',
-        subject: 'Your invoice is ready',
-        snippet: 'Please find your invoice attached',
-        receivedAt: new Date().toISOString(),
-        hasAttachments: 1,
-        attachments: ['invoice_123.pdf']
-      },
-      {
-        gmailMessageId: '2',
-        threadId: 't2',
-        fromAddress: 'noreply@shop.com',
-        subject: 'Order confirmation',
-        snippet: 'Thank you for your order',
-        receivedAt: new Date().toISOString(),
-        hasAttachments: 0,
-        attachments: []
-      }
-    ];
+    const emails = await fetchEmails();
 
     db.prepare('DELETE FROM gmail_staging').run();
-
-    let relevantCount = 0;
 
     const insert = db.prepare(`
       INSERT INTO gmail_staging (
@@ -56,8 +49,10 @@ gmailRouter.post('/sync', async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    mockEmails.forEach(email => {
-      const cls = classify(email.subject, email.snippet, email.attachments);
+    let relevantCount = 0;
+
+    emails.forEach(email => {
+      const cls = classify(email.subject, email.attachments);
       if (cls.isRelevant) relevantCount++;
 
       insert.run(
@@ -66,8 +61,8 @@ gmailRouter.post('/sync', async (req, res) => {
         email.fromAddress,
         email.subject,
         email.snippet,
-        email.receivedAt,
-        email.hasAttachments,
+        new Date(email.receivedAt).toISOString(),
+        email.attachments.length > 0 ? 1 : 0,
         JSON.stringify(email.attachments),
         cls.category,
         cls.isRelevant,
@@ -76,18 +71,15 @@ gmailRouter.post('/sync', async (req, res) => {
       );
     });
 
-    return res.json({
-      success: true,
-      scannedCount: mockEmails.length,
-      relevantCount
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: String(err) });
+    res.json({ success: true, scannedCount: emails.length, relevantCount });
+
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// fetch staged results
+// results
 gmailRouter.get('/results', (req, res) => {
   const rows = db.prepare('SELECT * FROM gmail_staging ORDER BY createdAt DESC').all();
-  return res.json({ success: true, results: rows });
+  res.json({ success: true, results: rows });
 });
