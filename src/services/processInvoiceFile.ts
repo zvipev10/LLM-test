@@ -5,6 +5,17 @@ function getPngHeaderHex(buffer: Buffer) {
   return buffer.slice(0, 8).toString('hex');
 }
 
+function looksLikePdf(fileBuffer: Buffer, mimeType: string, fileName: string) {
+  const lowerName = (fileName || '').toLowerCase();
+  const pdfSignature = fileBuffer.slice(0, 5).toString('utf8') === '%PDF-';
+
+  return (
+    mimeType === 'application/pdf' ||
+    lowerName.endsWith('.pdf') ||
+    pdfSignature
+  );
+}
+
 export async function processInvoiceFile(
   fileBuffer: Buffer,
   mimeType: string,
@@ -13,7 +24,7 @@ export async function processInvoiceFile(
   let imageBuffer = fileBuffer;
   let imageMimeType = mimeType;
 
-  if (mimeType === 'application/pdf') {
+  if (looksLikePdf(fileBuffer, mimeType, fileName)) {
     imageBuffer = await convertPdfToImage(fileBuffer);
     imageMimeType = 'image/png';
 
