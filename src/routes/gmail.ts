@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, createSimplePdfBuffer } from '../services/gmailService';
-import { extractInvoiceData } from '../services/openai';
-import { convertPdfToImage } from '../services/pdf';
+import { processInvoiceFile } from '../services/processInvoiceFile';
 
 export const gmailRouter = Router();
 
@@ -37,32 +36,11 @@ gmailRouter.post('/sync', async (req, res) => {
       if (email.attachments.length > 0) {
         for (const att of email.attachments) {
           try {
-            const originalBuffer = await downloadAttachment(email.gmailMessageId, att.attachmentId);
-
-            let imageBuffer = originalBuffer;
-            let imageMimeType = att.mimeType;
-
-            if (att.mimeType === 'application/pdf') {
-              imageBuffer = await convertPdfToImage(originalBuffer);
-              imageMimeType = 'image/png';
-            }
-
-            const data = await extractInvoiceData(imageBuffer, imageMimeType);
-
-            results.push({
-              success: true,
-              filename: att.fileName,
-              mimeType: att.mimeType,
-              data,
-              fileData: originalBuffer.toString('base64'),
-              source: 'gmail'
-            });
+            const buffer = await downloadAttachment(email.gmailMessageId, att.attachmentId);
+            const processed = await processInvoiceFile(buffer, att.mimeType, att.fileName);
+            results.push({ ...processed, source: 'gmail' });
           } catch (err: any) {
-            results.push({
-              success: false,
-              filename: att.fileName,
-              error: err.message
-            });
+            results.push({ success: false, filename: att.fileName, error: err.message });
           }
         }
       } else {
@@ -73,32 +51,15 @@ gmailRouter.post('/sync', async (req, res) => {
             email.snippet
           ]);
 
-          const imageBuffer = await convertPdfToImage(pdfBuffer);
-          const data = await extractInvoiceData(imageBuffer, 'image/png');
-
-          results.push({
-            success: true,
-            filename: `${email.subject || 'mail'}.pdf`,
-            mimeType: 'application/pdf',
-            data,
-            fileData: pdfBuffer.toString('base64'),
-            source: 'gmail'
-          });
+          const processed = await processInvoiceFile(pdfBuffer, 'application/pdf', `${email.subject || 'mail'}.pdf`);
+          results.push({ ...processed, source: 'gmail' });
         } catch (err: any) {
-          results.push({
-            success: false,
-            filename: `${email.subject || 'mail'}.pdf`,
-            error: err.message
-          });
+          results.push({ success: false, filename: `${email.subject || 'mail'}.pdf`, error: err.message });
         }
       }
     }
 
-    res.json({
-      success: true,
-      total: results.length,
-      results
-    });
+    res.json({ success: true, total: results.length, results });
   } catch (err: any) {
     if (err?.message === 'Gmail not connected') {
       return res.status(401).json({ success: false, error: 'Gmail not connected' });
