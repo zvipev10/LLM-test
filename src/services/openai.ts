@@ -49,6 +49,7 @@ export async function extractInvoiceData(
           {
             type: 'input_image',
             image_url: dataUrl,
+            detail: 'high',
           },
           {
             type: 'input_text',
