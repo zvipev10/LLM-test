@@ -2,24 +2,19 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-// Use persistent volume path on Railway, fallback to current directory for local dev
 const dataDir = '/app/data';
 const dbPath = path.join(dataDir, 'invoices.db');
 
-// Create data directory if it doesn't exist (for local development)
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-// Create or access database
 const db = new Database(dbPath);
 
-// Enable foreign keys
 db.pragma('foreign_keys = ON');
 
 console.log(`📦 Database initialized at: ${dbPath}`);
 
-// Initialize schema
 export function initializeDatabase() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS invoices (
@@ -39,9 +34,24 @@ export function initializeDatabase() {
       updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(date);
-    CREATE INDEX IF NOT EXISTS idx_invoices_vendor ON invoices(vendorName);
-    CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(createdAt);
+    CREATE TABLE IF NOT EXISTS gmail_staging (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gmailMessageId TEXT,
+      threadId TEXT,
+      fromAddress TEXT,
+      subject TEXT,
+      snippet TEXT,
+      receivedAt TEXT,
+      hasAttachments INTEGER,
+      attachmentNames TEXT,
+      category TEXT,
+      isRelevant INTEGER,
+      confidence TEXT,
+      reason TEXT,
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_gmail_message ON gmail_staging(gmailMessageId);
   `);
 }
 
