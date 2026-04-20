@@ -190,7 +190,7 @@ export function getInvoices(options?: {
     params.push(options.dateTo);
   }
 
-  query += ' ORDER BY createdAt DESC';
+  query += ' ORDER BY CASE WHEN date IS NULL OR date = "" THEN 1 ELSE 0 END, date ASC, createdAt ASC';
 
   if (options?.limit) {
     query += ' LIMIT ?';
