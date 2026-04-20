@@ -84,79 +84,31 @@ export function saveBatch(invoices: InvoiceWithFile[]): number[] {
 }
 
 export function syncInvoices(invoices: InvoiceWithFile[]): number[] {
-  const sync = db.transaction((incomingInvoices: InvoiceWithFile[]) => {
-    const ids: number[] = [];
-    const incomingExistingIds = new Set<number>();
+  const ids: number[] = [];
 
-    const selectExistingStmt = db.prepare('SELECT id, fileData, mimeType FROM invoices WHERE id = ?');
-    const updateStmt = db.prepare(`
-      UPDATE invoices
-      SET
-        fileName = ?,
-        mimeType = ?,
-        fileData = ?,
-        vendorName = ?,
-        date = ?,
-        totalWithVat = ?,
-        totalWithoutVat = ?,
-        vat = ?,
-        currency = ?,
-        confidence = ?,
-        status = ?,
-        updatedAt = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `);
-    const selectAllIdsStmt = db.prepare('SELECT id FROM invoices');
-    const deleteStmt = db.prepare('DELETE FROM invoices WHERE id = ?');
+  invoices.forEach((invoice, idx) => {
+    if (invoice.id) {
+      const updated = updateInvoice(invoice.id, {
+        vendorName: invoice.vendorName ?? null,
+        date: invoice.date ?? null,
+        totalWithVat: invoice.totalWithVat,
+        totalWithoutVat: invoice.totalWithoutVat,
+        vat: invoice.vat,
+        confidence: invoice.confidence || null,
+        status: invoice.status || 'processed'
+      });
 
-    incomingInvoices.forEach((invoice, idx) => {
-      validateFileData(invoice, idx);
-
-      if (invoice.id) {
-        const existing = selectExistingStmt.get(invoice.id) as { id: number; fileData: string | Buffer | null; mimeType: string | null } | undefined;
-
-        if (!existing) {
-          throw new Error(`Invoice with ID ${invoice.id} does not exist`);
-        }
-
-        const resolvedFileData = invoice.fileData ?? existing.fileData ?? null;
-        const resolvedMimeType = invoice.mimeType ?? existing.mimeType ?? null;
-
-        updateStmt.run(
-          invoice.fileName,
-          resolvedMimeType,
-          resolvedFileData,
-          invoice.vendorName ?? null,
-          invoice.date ?? null,
-          invoice.totalWithVat !== null && invoice.totalWithVat !== undefined ? invoice.totalWithVat : null,
-          invoice.totalWithoutVat !== null && invoice.totalWithoutVat !== undefined ? invoice.totalWithoutVat : null,
-          invoice.vat !== null && invoice.vat !== undefined ? invoice.vat : null,
-          invoice.currency || 'ILS',
-          invoice.confidence || null,
-          invoice.status || 'processed',
-          invoice.id
-        );
-
-        incomingExistingIds.add(invoice.id);
+      if (updated) {
         ids.push(invoice.id);
-        return;
       }
+      return;
+    }
 
-      const newId = saveInvoice(invoice, idx);
-      ids.push(newId);
-    });
-
-    const existingRows = selectAllIdsStmt.all() as { id: number }[];
-    existingRows.forEach(({ id }) => {
-      if (!incomingExistingIds.has(id) && !ids.includes(id)) {
-        deleteStmt.run(id);
-      }
-    });
-
-    return ids;
+    const newId = saveInvoice(invoice, idx);
+    ids.push(newId);
   });
 
-  return sync(invoices);
+  return ids;
 }
 
 export function clearAllInvoices(): number {
