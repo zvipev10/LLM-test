@@ -3,7 +3,7 @@ import { upload } from '../middleware/upload';
 import { extractInvoiceData } from '../services/openai';
 import { convertPdfToImage } from '../services/pdf';
 import { InvoiceResponse, ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceStats, syncInvoices, getInvoiceFileData } from '../database/invoiceService';
+import { getInvoices, getInvoiceStats, saveBatch, updateInvoice, getInvoiceFileData } from '../database/invoiceService';
 
 export const invoiceRouter = Router();
 
@@ -87,15 +87,34 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
     });
 
     try {
-      console.log('[SAVE] Syncing invoices with database snapshot...');
-      const ids = syncInvoices(invoices);
+      const invoicesToInsert = invoices.filter((inv) => !inv.id);
+      const invoicesToUpdate = invoices.filter((inv) => !!inv.id);
 
-      console.log(`[SAVE] Successfully synced ${ids.length} invoices to database`);
+      console.log(`[SAVE] Non-destructive save: ${invoicesToInsert.length} inserts, ${invoicesToUpdate.length} updates`);
+
+      const insertedIds = invoicesToInsert.length > 0 ? saveBatch(invoicesToInsert) : [];
+      let updatedCount = 0;
+
+      invoicesToUpdate.forEach((inv) => {
+        const updated = updateInvoice(inv.id, {
+          vendorName: inv.vendorName ?? null,
+          date: inv.date ?? null,
+          totalWithVat: inv.totalWithVat,
+          totalWithoutVat: inv.totalWithoutVat,
+          vat: inv.vat,
+          confidence: inv.confidence || null,
+          status: inv.status || 'processed'
+        });
+        if (updated) updatedCount += 1;
+      });
+
+      const savedCount = insertedIds.length + updatedCount;
+      console.log(`[SAVE] Successfully saved ${savedCount} invoices to database`);
 
       return res.status(200).json({
         success: true,
-        message: `Database updated with ${ids.length} invoices`,
-        savedCount: ids.length
+        message: `Database updated with ${savedCount} invoices`,
+        savedCount
       });
     } catch (dbError) {
       console.error('[SAVE] Database operation failed:', dbError);
