@@ -3,7 +3,7 @@ import { upload } from '../middleware/upload';
 import { extractInvoiceData } from '../services/openai';
 import { convertPdfToImage } from '../services/pdf';
 import { InvoiceResponse, ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceFileData, clearAllInvoices, saveInvoice, updateInvoice } from '../database/invoiceService';
+import { getInvoices, getInvoiceFileData, clearAllInvoices, saveInvoice, updateInvoice, deleteInvoice } from '../database/invoiceService';
 import { resetDatabaseFile } from '../database/db';
 
 export const invoiceRouter = Router();
@@ -95,6 +95,17 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
       });
     }
 
+    const existingInvoices = getInvoices();
+    const existingIds = new Set(existingInvoices.map((inv: any) => inv.id));
+    const incomingIds = new Set(invoices.filter((inv: any) => inv.id).map((inv: any) => inv.id));
+
+    // Delete removed rows
+    existingIds.forEach((id) => {
+      if (!incomingIds.has(id)) {
+        deleteInvoice(id);
+      }
+    });
+
     const ids: number[] = [];
 
     invoices.forEach((invoice, idx) => {
@@ -109,7 +120,7 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
 
     return res.status(200).json({
       success: true,
-      message: `Database updated with ${ids.length} invoices`,
+      message: `Database synced with ${ids.length} invoices`,
       savedCount: ids.length
     });
   } catch (error) {
