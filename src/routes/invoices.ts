@@ -3,7 +3,7 @@ import { upload } from '../middleware/upload';
 import { extractInvoiceData } from '../services/openai';
 import { convertPdfToImage } from '../services/pdf';
 import { InvoiceResponse, ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceFileData, clearAllInvoices, saveInvoice } from '../database/invoiceService';
+import { getInvoices, getInvoiceFileData, clearAllInvoices, saveInvoice, updateInvoice } from '../database/invoiceService';
 import { resetDatabaseFile } from '../database/db';
 
 export const invoiceRouter = Router();
@@ -98,7 +98,10 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
     const ids: number[] = [];
 
     invoices.forEach((invoice, idx) => {
-      if (!invoice.id) {
+      if (invoice.id) {
+        const updated = updateInvoice(invoice);
+        if (updated) ids.push(invoice.id);
+      } else {
         const id = saveInvoice(invoice, idx);
         ids.push(id);
       }
