@@ -79,11 +79,7 @@ export function resetDatabaseFile() {
     fs.unlinkSync(dbPath);
   }
 
-  db = new Database(dbPath);
-  db.pragma('foreign_keys = ON');
-  initializeDatabase();
-
-  console.log(`♻️ Database reset and recreated at: ${dbPath}`);
+  console.log(`♻️ Database file deleted at: ${dbPath}. Restart service to recreate clean DB.`);
 }
 
 export default db;
