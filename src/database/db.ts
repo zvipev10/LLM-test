@@ -62,6 +62,7 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_gmail_message ON gmail_staging(gmailMessageId);
   `);
 
+  ensureColumn('invoices', 'printed', "TEXT DEFAULT 'לא'");
   ensureColumn('gmail_staging', 'gmailAttachmentId', 'TEXT');
   ensureColumn('gmail_staging', 'fileName', 'TEXT');
   ensureColumn('gmail_staging', 'mimeType', 'TEXT');
