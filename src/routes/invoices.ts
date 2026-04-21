@@ -137,9 +137,10 @@ invoiceRouter.get('/list', (req: Request, res: Response) => {
       invoices
     });
   } catch (error) {
+    console.error('[LIST] Failed to retrieve invoices:', error);
     return res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to retrieve invoices'
+      error: error instanceof Error ? `${error.name}: ${error.message}` : String(error)
     });
   }
 });
