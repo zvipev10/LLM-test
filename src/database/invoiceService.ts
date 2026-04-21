@@ -84,13 +84,66 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
   return result.lastInsertRowid as number;
 }
 
+export function updateInvoice(invoice: InvoiceWithFile): boolean {
+  if (!invoice.id) return false;
+
+  const db = getDb();
+  const columns = getInvoiceColumns();
+  const assignments = [
+    'fileName = ?',
+    'mimeType = ?',
+    'vendorName = ?',
+    'date = ?',
+    'totalWithVat = ?',
+    'totalWithoutVat = ?',
+    'currency = ?'
+  ];
+  const values: any[] = [
+    invoice.fileName,
+    invoice.mimeType || null,
+    invoice.vendorName ?? null,
+    invoice.date ?? null,
+    invoice.totalWithVat ?? null,
+    invoice.totalWithoutVat ?? null,
+    invoice.currency || 'ILS'
+  ];
+
+  if (invoice.fileData) {
+    assignments.splice(2, 0, 'fileData = ?');
+    values.splice(2, 0, invoice.fileData);
+  }
+  if (columns.has('vat')) {
+    assignments.push('vat = ?');
+    values.push(invoice.vat ?? null);
+  }
+  if (columns.has('confidence')) {
+    assignments.push('confidence = ?');
+    values.push(invoice.confidence || null);
+  }
+  if (columns.has('status')) {
+    assignments.push('status = ?');
+    values.push(invoice.status || 'processed');
+  }
+  if (columns.has('updatedAt')) {
+    assignments.push('updatedAt = CURRENT_TIMESTAMP');
+  }
+
+  values.push(invoice.id);
+  const stmt = db.prepare(`UPDATE invoices SET ${assignments.join(', ')} WHERE id = ?`);
+  const result = stmt.run(...values);
+  return result.changes > 0;
+}
+
 export function saveBatch(invoices: InvoiceWithFile[]): number[] {
   return invoices.map((invoice, idx) => saveInvoice(invoice, idx));
 }
 
 export function syncInvoices(invoices: InvoiceWithFile[]): number[] {
   return invoices.map((invoice, idx) => {
-    if (invoice.id) return invoice.id;
+    if (invoice.id) {
+      updateInvoice(invoice);
+      return invoice.id;
+    }
     return saveInvoice(invoice, idx);
   });
 }
