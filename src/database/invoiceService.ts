@@ -9,6 +9,7 @@ export interface StoredInvoice extends InvoiceData {
   vat?: number;
   status?: string;
   createdAt?: string;
+  printed?: string;
 }
 
 export interface InvoiceWithFile extends StoredInvoice {
@@ -48,6 +49,7 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
   const hasVat = columns.has('vat');
   const hasConfidence = columns.has('confidence');
   const hasStatus = columns.has('status');
+  const hasPrinted = columns.has('printed');
 
   const insertColumns = [
     'fileName',
@@ -82,6 +84,10 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
     insertColumns.push('status');
     values.push(invoice.status || 'processed');
   }
+  if (hasPrinted) {
+    insertColumns.push('printed');
+    values.push(invoice.printed || 'לא');
+  }
 
   const placeholders = insertColumns.map(() => '?').join(', ');
   const stmt = db.prepare(`INSERT INTO invoices (${insertColumns.join(', ')}) VALUES (${placeholders})`);
@@ -111,7 +117,8 @@ export function hasInvoiceChanges(invoice: InvoiceWithFile): boolean {
     [existing.currency, invoice.currency || 'ILS'],
     [existing.vat, invoice.vat ?? null],
     [existing.confidence, invoice.confidence || null],
-    [existing.status, invoice.status || 'processed']
+    [existing.status, invoice.status || 'processed'],
+    [existing.printed, invoice.printed || 'לא']
   ];
 
   return comparisons.some(([currentValue, incomingValue]) => {
@@ -158,6 +165,10 @@ export function updateInvoice(invoice: InvoiceWithFile): boolean {
   if (columns.has('status')) {
     assignments.push('status = ?');
     values.push(invoice.status || 'processed');
+  }
+  if (columns.has('printed')) {
+    assignments.push('printed = ?');
+    values.push(invoice.printed || 'לא');
   }
   if (columns.has('updatedAt')) {
     assignments.push('updatedAt = CURRENT_TIMESTAMP');
