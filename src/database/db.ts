@@ -9,7 +9,7 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const db = new Database(dbPath);
+let db = new Database(dbPath);
 
 db.pragma('foreign_keys = ON');
 
@@ -66,6 +66,24 @@ export function initializeDatabase() {
   ensureColumn('gmail_staging', 'fileName', 'TEXT');
   ensureColumn('gmail_staging', 'mimeType', 'TEXT');
   ensureColumn('gmail_staging', 'sourceType', 'TEXT DEFAULT "attachment"');
+}
+
+export function resetDatabaseFile() {
+  try {
+    db.close();
+  } catch (error) {
+    console.warn('Could not close database before reset:', error);
+  }
+
+  if (fs.existsSync(dbPath)) {
+    fs.unlinkSync(dbPath);
+  }
+
+  db = new Database(dbPath);
+  db.pragma('foreign_keys = ON');
+  initializeDatabase();
+
+  console.log(`♻️ Database reset and recreated at: ${dbPath}`);
 }
 
 export default db;
