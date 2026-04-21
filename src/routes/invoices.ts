@@ -99,10 +99,12 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
     const existingIds = new Set(existingInvoices.map((inv: any) => inv.id));
     const incomingIds = new Set(invoices.filter((inv: any) => inv.id).map((inv: any) => inv.id));
 
-    // Delete removed rows
+    let deletedCount = 0;
+
     existingIds.forEach((id) => {
       if (!incomingIds.has(id)) {
-        deleteInvoice(id);
+        const deleted = deleteInvoice(id);
+        if (deleted) deletedCount += 1;
       }
     });
 
@@ -120,8 +122,9 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
 
     return res.status(200).json({
       success: true,
-      message: `Database synced with ${ids.length} invoices`,
-      savedCount: ids.length
+      message: `Database synced: ${ids.length} saved/updated, ${deletedCount} deleted`,
+      savedCount: ids.length,
+      deletedCount
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
