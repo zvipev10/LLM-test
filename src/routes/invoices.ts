@@ -4,8 +4,24 @@ import { extractInvoiceData } from '../services/openai';
 import { convertPdfToImage } from '../services/pdf';
 import { InvoiceResponse, ErrorResponse } from '../types/invoice';
 import { getInvoices, getInvoiceStats, syncInvoices, getInvoiceFileData, clearAllInvoices } from '../database/invoiceService';
+import { resetDatabaseFile } from '../database/db';
 
 export const invoiceRouter = Router();
+
+invoiceRouter.get('/reset-db-file', (_req: Request, res: Response) => {
+  try {
+    resetDatabaseFile();
+    return res.status(200).json({
+      success: true,
+      message: 'Database file deleted and recreated successfully'
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to reset DB file'
+    });
+  }
+});
 
 invoiceRouter.post(
   '/upload',
