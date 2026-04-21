@@ -3,7 +3,7 @@ import { upload } from '../middleware/upload';
 import { extractInvoiceData } from '../services/openai';
 import { convertPdfToImage } from '../services/pdf';
 import { InvoiceResponse, ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceStats, syncInvoices, getInvoiceFileData } from '../database/invoiceService';
+import { getInvoices, getInvoiceStats, syncInvoices, getInvoiceFileData, clearAllInvoices } from '../database/invoiceService';
 
 export const invoiceRouter = Router();
 
@@ -107,6 +107,21 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: errorMessage
+    });
+  }
+});
+
+invoiceRouter.post('/reset-db', (_req: Request, res: Response) => {
+  try {
+    const deleted = clearAllInvoices();
+    return res.status(200).json({
+      success: true,
+      message: `Deleted ${deleted} invoices`
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to reset DB'
     });
   }
 });
