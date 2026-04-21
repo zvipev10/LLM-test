@@ -35,6 +35,11 @@ function getInvoiceColumns() {
   return new Set(columns.map((col: any) => col.name));
 }
 
+function normalizeComparableValue(value: any) {
+  if (value === undefined || value === '') return null;
+  return value;
+}
+
 export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number {
   const db = getDb();
   validateFileData(invoice, rowIndex);
@@ -82,6 +87,36 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
   const stmt = db.prepare(`INSERT INTO invoices (${insertColumns.join(', ')}) VALUES (${placeholders})`);
   const result = stmt.run(...values);
   return result.lastInsertRowid as number;
+}
+
+export function getInvoiceById(id: number): StoredInvoice | null {
+  const db = getDb();
+  const result = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id) as StoredInvoice | undefined;
+  return result || null;
+}
+
+export function hasInvoiceChanges(invoice: InvoiceWithFile): boolean {
+  if (!invoice.id) return true;
+
+  const existing = getInvoiceById(invoice.id);
+  if (!existing) return true;
+
+  const comparisons: Array<[any, any]> = [
+    [existing.fileName, invoice.fileName],
+    [existing.mimeType, invoice.mimeType || null],
+    [existing.vendorName, invoice.vendorName ?? null],
+    [existing.date, invoice.date ?? null],
+    [existing.totalWithVat, invoice.totalWithVat ?? null],
+    [existing.totalWithoutVat, invoice.totalWithoutVat ?? null],
+    [existing.currency, invoice.currency || 'ILS'],
+    [existing.vat, invoice.vat ?? null],
+    [existing.confidence, invoice.confidence || null],
+    [existing.status, invoice.status || 'processed']
+  ];
+
+  return comparisons.some(([currentValue, incomingValue]) => {
+    return normalizeComparableValue(currentValue) !== normalizeComparableValue(incomingValue);
+  });
 }
 
 export function updateInvoice(invoice: InvoiceWithFile): boolean {
