@@ -26,6 +26,11 @@ function validateFileData(invoice: InvoiceWithFile, rowIndex?: number) {
   }
 }
 
+function getInvoiceColumns() {
+  const columns = db.prepare('PRAGMA table_info(invoices)').all() as Array<{ name: string }>;
+  return new Set(columns.map((col) => col.name));
+}
+
 export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number {
   validateFileData(invoice, rowIndex);
 
@@ -124,7 +129,28 @@ export function getInvoices(options?: {
   dateFrom?: string;
   dateTo?: string;
 }): StoredInvoice[] {
-  let query = 'SELECT id, fileName, mimeType, vendorName, date, totalWithVat, totalWithoutVat, vat, currency, confidence, status, createdAt FROM invoices WHERE 1=1';
+  const columns = getInvoiceColumns();
+  const hasCreatedAt = columns.has('createdAt');
+  const hasVat = columns.has('vat');
+  const hasConfidence = columns.has('confidence');
+  const hasStatus = columns.has('status');
+
+  const selectFields = [
+    'id',
+    'fileName',
+    'mimeType',
+    'vendorName',
+    'date',
+    'totalWithVat',
+    'totalWithoutVat',
+    hasVat ? 'vat' : 'NULL as vat',
+    'currency',
+    hasConfidence ? 'confidence' : 'NULL as confidence',
+    hasStatus ? 'status' : 'NULL as status',
+    hasCreatedAt ? 'createdAt' : 'NULL as createdAt'
+  ];
+
+  let query = `SELECT ${selectFields.join(', ')} FROM invoices WHERE 1=1`;
   const params: (string | number)[] = [];
 
   if (options?.vendorName) {
@@ -142,7 +168,11 @@ export function getInvoices(options?: {
     params.push(options.dateTo);
   }
 
-  query += ' ORDER BY CASE WHEN date IS NULL OR date = "" THEN 1 ELSE 0 END, date ASC, createdAt ASC';
+  if (hasCreatedAt) {
+    query += ' ORDER BY CASE WHEN date IS NULL OR date = "" THEN 1 ELSE 0 END, date ASC, createdAt ASC';
+  } else {
+    query += ' ORDER BY CASE WHEN date IS NULL OR date = "" THEN 1 ELSE 0 END, date ASC, id ASC';
+  }
 
   if (options?.limit) {
     query += ' LIMIT ?';
@@ -184,7 +214,12 @@ export function getInvoiceFileData(id: number): { fileData: string; mimeType: st
 }
 
 export function updateInvoice(id: number, updates: Partial<StoredInvoice>): boolean {
-  const allowedFields = ['vendorName', 'date', 'totalWithVat', 'totalWithoutVat', 'vat', 'confidence', 'status'];
+  const columns = getInvoiceColumns();
+  const allowedFields = ['vendorName', 'date', 'totalWithVat', 'totalWithoutVat'];
+  if (columns.has('vat')) allowedFields.push('vat');
+  if (columns.has('confidence')) allowedFields.push('confidence');
+  if (columns.has('status')) allowedFields.push('status');
+
   const fields = Object.keys(updates).filter(key => allowedFields.includes(key));
 
   if (fields.length === 0) return false;
@@ -192,9 +227,11 @@ export function updateInvoice(id: number, updates: Partial<StoredInvoice>): bool
   const setClause = fields.map(f => `${f} = ?`).join(', ');
   const values = fields.map(f => updates[f as keyof StoredInvoice]);
 
+  const timestampClause = columns.has('updatedAt') ? ', updatedAt = CURRENT_TIMESTAMP' : '';
+
   const stmt = db.prepare(`
     UPDATE invoices 
-    SET ${setClause}, updatedAt = CURRENT_TIMESTAMP 
+    SET ${setClause}${timestampClause}
     WHERE id = ?
   `);
 
@@ -214,12 +251,21 @@ export function getInvoiceStats(): {
   totalVat: number;
   avgConfidence: string;
 } {
+  const columns = getInvoiceColumns();
+  const hasVat = columns.has('vat');
+  const hasConfidence = columns.has('confidence');
+
+  const vatExpr = hasVat ? 'SUM(vat) as totalVat' : '0 as totalVat';
+  const confidenceExpr = hasConfidence
+    ? `AVG(CASE confidence WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END) as avgConfidence`
+    : '2 as avgConfidence';
+
   const stmt = db.prepare(`
     SELECT 
       COUNT(*) as total,
       SUM(totalWithVat) as totalRevenue,
-      SUM(vat) as totalVat,
-      AVG(CASE confidence WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END) as avgConfidence
+      ${vatExpr},
+      ${confidenceExpr}
     FROM invoices
   `);
 
