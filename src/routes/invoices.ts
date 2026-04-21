@@ -3,7 +3,7 @@ import { upload } from '../middleware/upload';
 import { extractInvoiceData } from '../services/openai';
 import { convertPdfToImage } from '../services/pdf';
 import { InvoiceResponse, ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceStats, syncInvoices, getInvoiceFileData, clearAllInvoices } from '../database/invoiceService';
+import { getInvoices, getInvoiceFileData, clearAllInvoices, saveInvoice } from '../database/invoiceService';
 import { resetDatabaseFile } from '../database/db';
 
 export const invoiceRouter = Router();
@@ -13,7 +13,7 @@ invoiceRouter.get('/reset-db-file', (_req: Request, res: Response) => {
     resetDatabaseFile();
     return res.status(200).json({
       success: true,
-      message: 'Database file deleted and recreated successfully'
+      message: 'Database file deleted. Restart service to recreate clean DB.'
     });
   } catch (error) {
     return res.status(500).json({
@@ -95,31 +95,22 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
       });
     }
 
-    console.log(`[SAVE] Received ${invoices.length} invoices`);
-    invoices.forEach((inv, idx) => {
-      const hasFileData = !!inv.fileData;
-      const fileDataLength = hasFileData ? (typeof inv.fileData === 'string' ? inv.fileData.length : 'unknown') : 0;
-      console.log(`[SAVE] Invoice ${idx}: id=${inv.id ?? 'new'}, fileName=${inv.fileName}, hasFileData=${hasFileData}, fileDataLength=${fileDataLength}, mimeType=${inv.mimeType}`);
+    const ids: number[] = [];
+
+    invoices.forEach((invoice, idx) => {
+      if (!invoice.id) {
+        const id = saveInvoice(invoice, idx);
+        ids.push(id);
+      }
     });
 
-    try {
-      console.log('[SAVE] Syncing invoices with database snapshot...');
-      const ids = syncInvoices(invoices);
-
-      console.log(`[SAVE] Successfully synced ${ids.length} invoices to database`);
-
-      return res.status(200).json({
-        success: true,
-        message: `Database updated with ${ids.length} invoices`,
-        savedCount: ids.length
-      });
-    } catch (dbError) {
-      console.error('[SAVE] Database operation failed:', dbError);
-      throw dbError;
-    }
+    return res.status(200).json({
+      success: true,
+      message: `Database updated with ${ids.length} invoices`,
+      savedCount: ids.length
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('[SAVE] Save batch failed:', errorMessage, error);
     return res.status(500).json({
       success: false,
       error: errorMessage
@@ -142,12 +133,9 @@ invoiceRouter.post('/reset-db', (_req: Request, res: Response) => {
   }
 });
 
-invoiceRouter.get('/list', (req: Request, res: Response) => {
+invoiceRouter.get('/list', (_req: Request, res: Response) => {
   try {
-    const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
-    const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
-
-    const invoices = getInvoices({ limit, offset });
+    const invoices = getInvoices();
     return res.status(200).json({
       success: true,
       invoices
@@ -170,25 +158,17 @@ invoiceRouter.get('/file/:id', (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Invalid invoice ID' });
     }
 
-    const fileData = getInvoiceFileData(invoiceId);
+    const fileData = getInvoiceFileData(invoiceId) as any;
 
     if (!fileData || !fileData.fileData) {
-      console.error(`File not found for invoice ${invoiceId}`);
       return res.status(404).json({ success: false, error: 'File not found or no file data stored' });
     }
 
-    try {
-      const buffer = Buffer.from(fileData.fileData, 'base64');
-
-      res.set('Content-Type', fileData.mimeType);
-      res.set('Content-Disposition', 'inline');
-      res.send(buffer);
-    } catch (conversionErr) {
-      console.error(`Failed to convert base64 for invoice ${invoiceId}:`, conversionErr);
-      return res.status(500).json({ success: false, error: 'Failed to process file data' });
-    }
+    const buffer = Buffer.from(fileData.fileData, 'base64');
+    res.set('Content-Type', fileData.mimeType || 'application/octet-stream');
+    res.set('Content-Disposition', 'inline');
+    res.send(buffer);
   } catch (error) {
-    console.error('File retrieval error:', error);
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to retrieve file'
@@ -196,9 +176,16 @@ invoiceRouter.get('/file/:id', (req: Request, res: Response) => {
   }
 });
 
-invoiceRouter.get('/stats', (req: Request, res: Response) => {
+invoiceRouter.get('/stats', (_req: Request, res: Response) => {
   try {
-    const stats = getInvoiceStats();
+    const invoices = getInvoices();
+    const stats = {
+      total: invoices.length,
+      totalRevenue: invoices.reduce((sum: number, inv: any) => sum + (inv.totalWithVat || 0), 0),
+      totalVat: invoices.reduce((sum: number, inv: any) => sum + (inv.vat || 0), 0),
+      avgConfidence: 'medium'
+    };
+
     return res.status(200).json({
       success: true,
       stats
