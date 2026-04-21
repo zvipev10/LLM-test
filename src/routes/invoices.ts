@@ -3,7 +3,7 @@ import { upload } from '../middleware/upload';
 import { extractInvoiceData } from '../services/openai';
 import { convertPdfToImage } from '../services/pdf';
 import { InvoiceResponse, ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceFileData, clearAllInvoices, saveInvoice, updateInvoice, deleteInvoice } from '../database/invoiceService';
+import { getInvoices, getInvoiceFileData, clearAllInvoices, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges } from '../database/invoiceService';
 import { resetDatabaseFile } from '../database/db';
 
 export const invoiceRouter = Router();
@@ -109,21 +109,29 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
     });
 
     const ids: number[] = [];
+    let savedCount = 0;
 
     invoices.forEach((invoice, idx) => {
       if (invoice.id) {
-        const updated = updateInvoice(invoice);
-        if (updated) ids.push(invoice.id);
+        const hasChanges = hasInvoiceChanges(invoice);
+        if (hasChanges) {
+          const updated = updateInvoice(invoice);
+          if (updated) {
+            ids.push(invoice.id);
+            savedCount += 1;
+          }
+        }
       } else {
         const id = saveInvoice(invoice, idx);
         ids.push(id);
+        savedCount += 1;
       }
     });
 
     return res.status(200).json({
       success: true,
-      message: `Database synced: ${ids.length} saved/updated, ${deletedCount} deleted`,
-      savedCount: ids.length,
+      message: `Database synced: ${savedCount} saved/updated, ${deletedCount} deleted`,
+      savedCount,
       deletedCount
     });
   } catch (error) {
