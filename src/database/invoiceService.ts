@@ -39,14 +39,22 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
   const db = getDb();
   validateFileData(invoice, rowIndex);
 
-  const stmt = db.prepare(`
-    INSERT INTO invoices (
-      fileName, mimeType, fileData, vendorName, date,
-      totalWithVat, totalWithoutVat, vat, currency, confidence, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  const columns = getInvoiceColumns();
+  const hasVat = columns.has('vat');
+  const hasConfidence = columns.has('confidence');
+  const hasStatus = columns.has('status');
 
-  const result = stmt.run(
+  const insertColumns = [
+    'fileName',
+    'mimeType',
+    'fileData',
+    'vendorName',
+    'date',
+    'totalWithVat',
+    'totalWithoutVat',
+    'currency'
+  ];
+  const values = [
     invoice.fileName,
     invoice.mimeType || null,
     invoice.fileData || null,
@@ -54,13 +62,37 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
     invoice.date ?? null,
     invoice.totalWithVat ?? null,
     invoice.totalWithoutVat ?? null,
-    invoice.vat ?? null,
-    invoice.currency || 'ILS',
-    invoice.confidence || null,
-    'processed'
-  );
+    invoice.currency || 'ILS'
+  ];
 
+  if (hasVat) {
+    insertColumns.push('vat');
+    values.push(invoice.vat ?? null);
+  }
+  if (hasConfidence) {
+    insertColumns.push('confidence');
+    values.push(invoice.confidence || null);
+  }
+  if (hasStatus) {
+    insertColumns.push('status');
+    values.push(invoice.status || 'processed');
+  }
+
+  const placeholders = insertColumns.map(() => '?').join(', ');
+  const stmt = db.prepare(`INSERT INTO invoices (${insertColumns.join(', ')}) VALUES (${placeholders})`);
+  const result = stmt.run(...values);
   return result.lastInsertRowid as number;
+}
+
+export function saveBatch(invoices: InvoiceWithFile[]): number[] {
+  return invoices.map((invoice, idx) => saveInvoice(invoice, idx));
+}
+
+export function syncInvoices(invoices: InvoiceWithFile[]): number[] {
+  return invoices.map((invoice, idx) => {
+    if (invoice.id) return invoice.id;
+    return saveInvoice(invoice, idx);
+  });
 }
 
 export function getInvoices(): StoredInvoice[] {
