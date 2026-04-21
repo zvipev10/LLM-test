@@ -134,6 +134,13 @@ export function updateInvoice(invoice: InvoiceWithFile): boolean {
   return result.changes > 0;
 }
 
+export function deleteInvoice(id: number): boolean {
+  const db = getDb();
+  const stmt = db.prepare('DELETE FROM invoices WHERE id = ?');
+  const result = stmt.run(id);
+  return result.changes > 0;
+}
+
 export function saveBatch(invoices: InvoiceWithFile[]): number[] {
   return invoices.map((invoice, idx) => saveInvoice(invoice, idx));
 }
