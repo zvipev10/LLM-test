@@ -1,8 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { upload } from '../middleware/upload';
-import { extractInvoiceData } from '../services/openai';
-import { convertPdfToImage } from '../services/pdf';
-import { InvoiceResponse, ErrorResponse } from '../types/invoice';
+import { processInvoiceFile } from '../services/processInvoiceFile';
+import { ErrorResponse } from '../types/invoice';
 import { getInvoices, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges } from '../database/invoiceService';
 
 export const invoiceRouter = Router();
@@ -25,25 +24,7 @@ invoiceRouter.post(
         files.map(async (file) => {
           try {
             const { buffer, mimetype, originalname } = file;
-
-            let imageBuffer = buffer;
-            let imageMimeType = mimetype;
-
-            if (mimetype === 'application/pdf') {
-              imageBuffer = await convertPdfToImage(buffer);
-              imageMimeType = 'image/png';
-            }
-
-            const invoiceData = await extractInvoiceData(imageBuffer, imageMimeType);
-            const base64File = buffer.toString('base64');
-
-            return {
-              success: true,
-              filename: originalname,
-              mimeType: mimetype,
-              data: invoiceData,
-              fileData: base64File
-            } as InvoiceResponse & { fileData: string };
+            return await processInvoiceFile(buffer, mimetype, originalname);
           } catch (err) {
             return {
               success: false,
