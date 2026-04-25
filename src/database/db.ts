@@ -41,32 +41,9 @@ export function initializeDatabase() {
       createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
       updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     );
-
-    CREATE TABLE IF NOT EXISTS gmail_staging (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      gmailMessageId TEXT,
-      threadId TEXT,
-      fromAddress TEXT,
-      subject TEXT,
-      snippet TEXT,
-      receivedAt TEXT,
-      hasAttachments INTEGER,
-      attachmentNames TEXT,
-      category TEXT,
-      isRelevant INTEGER,
-      confidence TEXT,
-      reason TEXT,
-      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_gmail_message ON gmail_staging(gmailMessageId);
   `);
 
   ensureColumn('invoices', 'printed', "TEXT DEFAULT 'לא'");
-  ensureColumn('gmail_staging', 'gmailAttachmentId', 'TEXT');
-  ensureColumn('gmail_staging', 'fileName', 'TEXT');
-  ensureColumn('gmail_staging', 'mimeType', 'TEXT');
-  ensureColumn('gmail_staging', 'sourceType', 'TEXT DEFAULT "attachment"');
 }
 
 export default db;

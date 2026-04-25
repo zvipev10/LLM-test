@@ -187,20 +187,6 @@ export function deleteInvoice(id: number): boolean {
   return result.changes > 0;
 }
 
-export function saveBatch(invoices: InvoiceWithFile[]): number[] {
-  return invoices.map((invoice, idx) => saveInvoice(invoice, idx));
-}
-
-export function syncInvoices(invoices: InvoiceWithFile[]): number[] {
-  return invoices.map((invoice, idx) => {
-    if (invoice.id) {
-      updateInvoice(invoice);
-      return invoice.id;
-    }
-    return saveInvoice(invoice, idx);
-  });
-}
-
 export function getInvoices(): StoredInvoice[] {
   const db = getDb();
   const columns = getInvoiceColumns();
