@@ -214,11 +214,6 @@ export function getInvoices(): StoredInvoice[] {
   return db.prepare(query).all();
 }
 
-export function clearAllInvoices(): number {
-  const db = getDb();
-  return db.prepare('DELETE FROM invoices').run().changes;
-}
-
 export function getInvoiceFileData(id: number) {
   const db = getDb();
   return db.prepare('SELECT fileData, mimeType FROM invoices WHERE id = ?').get(id);

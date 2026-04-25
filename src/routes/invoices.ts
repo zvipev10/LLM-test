@@ -3,25 +3,9 @@ import { upload } from '../middleware/upload';
 import { extractInvoiceData } from '../services/openai';
 import { convertPdfToImage } from '../services/pdf';
 import { InvoiceResponse, ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceFileData, clearAllInvoices, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges } from '../database/invoiceService';
-import { resetDatabaseFile } from '../database/db';
+import { getInvoices, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges } from '../database/invoiceService';
 
 export const invoiceRouter = Router();
-
-invoiceRouter.get('/reset-db-file', (_req: Request, res: Response) => {
-  try {
-    resetDatabaseFile();
-    return res.status(200).json({
-      success: true,
-      message: 'Database file deleted. Restart service to recreate clean DB.'
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to reset DB file'
-    });
-  }
-});
 
 invoiceRouter.post(
   '/upload',
@@ -139,21 +123,6 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: errorMessage
-    });
-  }
-});
-
-invoiceRouter.post('/reset-db', (_req: Request, res: Response) => {
-  try {
-    const deleted = clearAllInvoices();
-    return res.status(200).json({
-      success: true,
-      message: `Deleted ${deleted} invoices`
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to reset DB'
     });
   }
 });

@@ -69,18 +69,4 @@ export function initializeDatabase() {
   ensureColumn('gmail_staging', 'sourceType', 'TEXT DEFAULT "attachment"');
 }
 
-export function resetDatabaseFile() {
-  try {
-    db.close();
-  } catch (error) {
-    console.warn('Could not close database before reset:', error);
-  }
-
-  if (fs.existsSync(dbPath)) {
-    fs.unlinkSync(dbPath);
-  }
-
-  console.log(`♻️ Database file deleted at: ${dbPath}. Restart service to recreate clean DB.`);
-}
-
 export default db;
