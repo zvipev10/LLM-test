@@ -245,7 +245,7 @@ export async function sendInvoiceToMorning(invoice: StoredInvoice) {
   const invoiceDate = formatDate(invoice.date);
   const accountingClassification = await getExpenseAccountingClassification();
   const payload = {
-    paymentType: Number(process.env.GREEN_INVOICE_EXPENSE_PAYMENT_TYPE || 2),
+    paymentType: Number(process.env.GREEN_INVOICE_EXPENSE_PAYMENT_TYPE || 11),
     currency: invoice.currency || 'ILS',
     currencyRate: 1,
     vat: formatAmount(invoice.vat),
