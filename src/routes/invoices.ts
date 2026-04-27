@@ -2,9 +2,9 @@ import { Router, Request, Response } from 'express';
 import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus } from '../database/invoiceService';
+import { getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus } from '../database/invoiceService';
 import { logger } from '../logger';
-import { sendInvoiceToMorning } from '../services/morningClient';
+import { sendInvoiceToMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
 
 export const invoiceRouter = Router();
 
@@ -13,6 +13,8 @@ type MorningSyncResult = {
   success: boolean;
   skipped?: boolean;
   morningExpenseId?: string | null;
+  morningFileSyncStatus?: 'uploaded' | 'failed' | 'missing' | null;
+  morningFileSyncError?: string | null;
   error?: string;
 };
 
@@ -198,23 +200,61 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
         continue;
       }
 
-      if (invoice.morningSyncStatus === 'sent' && invoice.morningExpenseId) {
-        results.push({
-          invoiceId: id,
-          success: true,
-          skipped: true,
-          morningExpenseId: invoice.morningExpenseId
-        });
-        continue;
-      }
-
       try {
-        const morningResult = await sendInvoiceToMorning(invoice);
-        updateMorningSyncStatus(id, 'sent', morningResult.expenseId, null);
+        const existingExpenseId = invoice.morningSyncStatus === 'sent' ? invoice.morningExpenseId : null;
+        const morningResult = existingExpenseId
+          ? { expenseId: existingExpenseId, response: null }
+          : await sendInvoiceToMorning(invoice);
+        const expenseId = morningResult.expenseId;
+
+        if (!expenseId) {
+          throw new Error('Morning did not return an expense ID');
+        }
+
+        if (!existingExpenseId) {
+          updateMorningSyncStatus(id, 'sent', expenseId, null);
+        }
+
+        let morningFileSyncStatus: MorningSyncResult['morningFileSyncStatus'] = invoice.morningFileSyncStatus as MorningSyncResult['morningFileSyncStatus'] || null;
+        let morningFileSyncError: string | null = null;
+
+        if (invoice.morningFileSyncStatus !== 'uploaded') {
+          const fileData = getInvoiceFileData(id) as { fileData?: string; mimeType?: string | null } | undefined;
+
+          if (fileData?.fileData) {
+            try {
+              await uploadInvoiceFileToMorningExpense({
+                invoiceId: id,
+                expenseId,
+                fileName: invoice.fileName,
+                mimeType: fileData.mimeType,
+                fileBuffer: Buffer.from(fileData.fileData, 'base64')
+              });
+              updateMorningFileSyncStatus(id, 'uploaded', null);
+              morningFileSyncStatus = 'uploaded';
+            } catch (fileError) {
+              morningFileSyncError = fileError instanceof Error ? fileError.message : String(fileError);
+              updateMorningFileSyncStatus(id, 'failed', morningFileSyncError);
+              morningFileSyncStatus = 'failed';
+              logger.error({
+                invoiceId: id,
+                expenseId,
+                error: morningFileSyncError
+              }, 'invoice morning file sync failed');
+            }
+          } else {
+            morningFileSyncStatus = 'missing';
+            morningFileSyncError = 'No stored invoice file was found';
+          }
+        }
+
         results.push({
           invoiceId: id,
           success: true,
-          morningExpenseId: morningResult.expenseId
+          skipped: Boolean(existingExpenseId),
+          morningExpenseId: expenseId,
+          morningFileSyncStatus,
+          morningFileSyncError
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -232,9 +272,11 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
     }
 
     const successCount = results.filter((result) => result.success).length;
+    const fileFailedCount = results.filter((result) => result.morningFileSyncStatus === 'failed').length;
     logger.info({
       requestedCount: ids.length,
       successCount,
+      fileFailedCount,
       failedCount: results.length - successCount,
       durationMs: Date.now() - startedAt
     }, 'invoice morning batch completed');
@@ -243,6 +285,7 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
       success: true,
       successCount,
       failedCount: results.length - successCount,
+      fileFailedCount,
       results
     });
   } catch (error) {

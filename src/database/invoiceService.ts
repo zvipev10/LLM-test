@@ -15,6 +15,9 @@ export interface StoredInvoice extends InvoiceData {
   morningSyncStatus?: string | null;
   morningSyncedAt?: string | null;
   morningSyncError?: string | null;
+  morningFileSyncStatus?: string | null;
+  morningFileSyncedAt?: string | null;
+  morningFileSyncError?: string | null;
 }
 
 export interface InvoiceWithFile extends StoredInvoice {
@@ -290,5 +293,30 @@ export function updateMorningSyncStatus(
     updated,
     durationMs: Date.now() - startedAt
   }, 'invoice morning sync status updated');
+  return updated;
+}
+
+export function updateMorningFileSyncStatus(
+  id: number,
+  status: 'uploaded' | 'failed',
+  error: string | null
+): boolean {
+  const startedAt = Date.now();
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE invoices
+    SET morningFileSyncStatus = ?,
+        morningFileSyncedAt = CURRENT_TIMESTAMP,
+        morningFileSyncError = ?
+    WHERE id = ?
+  `);
+  const result = stmt.run(status, error, id);
+  const updated = result.changes > 0;
+  logger.info({
+    invoiceId: id,
+    status,
+    updated,
+    durationMs: Date.now() - startedAt
+  }, 'invoice morning file sync status updated');
   return updated;
 }

@@ -50,6 +50,9 @@ export function initializeDatabase() {
   ensureColumn('invoices', 'morningSyncStatus', 'TEXT');
   ensureColumn('invoices', 'morningSyncedAt', 'DATETIME');
   ensureColumn('invoices', 'morningSyncError', 'TEXT');
+  ensureColumn('invoices', 'morningFileSyncStatus', 'TEXT');
+  ensureColumn('invoices', 'morningFileSyncedAt', 'DATETIME');
+  ensureColumn('invoices', 'morningFileSyncError', 'TEXT');
 
   logger.info({
     dbPath,
