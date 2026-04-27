@@ -1,4 +1,5 @@
 import { InvoiceData } from '../types/invoice';
+import { logger } from '../logger';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
 
@@ -42,6 +43,7 @@ function normalizeComparableValue(value: any) {
 }
 
 export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number {
+  const startedAt = Date.now();
   const db = getDb();
   validateFileData(invoice, rowIndex);
 
@@ -92,20 +94,42 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
   const placeholders = insertColumns.map(() => '?').join(', ');
   const stmt = db.prepare(`INSERT INTO invoices (${insertColumns.join(', ')}) VALUES (${placeholders})`);
   const result = stmt.run(...values);
-  return result.lastInsertRowid as number;
+  const id = result.lastInsertRowid as number;
+  logger.info({
+    invoiceId: id,
+    rowIndex,
+    hasFileData: Boolean(invoice.fileData),
+    durationMs: Date.now() - startedAt
+  }, 'invoice inserted');
+  return id;
 }
 
 export function getInvoiceById(id: number): StoredInvoice | null {
+  const startedAt = Date.now();
   const db = getDb();
   const result = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id) as StoredInvoice | undefined;
+  logger.info({
+    invoiceId: id,
+    found: Boolean(result),
+    durationMs: Date.now() - startedAt
+  }, 'invoice fetched by id');
   return result || null;
 }
 
 export function hasInvoiceChanges(invoice: InvoiceWithFile): boolean {
+  const startedAt = Date.now();
   if (!invoice.id) return true;
 
   const existing = getInvoiceById(invoice.id);
-  if (!existing) return true;
+  if (!existing) {
+    logger.info({
+      invoiceId: invoice.id,
+      hasChanges: true,
+      reason: 'missing existing invoice',
+      durationMs: Date.now() - startedAt
+    }, 'invoice change check completed');
+    return true;
+  }
 
   const comparisons: Array<[any, any]> = [
     [existing.fileName, invoice.fileName],
@@ -121,14 +145,21 @@ export function hasInvoiceChanges(invoice: InvoiceWithFile): boolean {
     [existing.printed, invoice.printed || 'לא']
   ];
 
-  return comparisons.some(([currentValue, incomingValue]) => {
+  const hasChanges = comparisons.some(([currentValue, incomingValue]) => {
     return normalizeComparableValue(currentValue) !== normalizeComparableValue(incomingValue);
   });
+  logger.info({
+    invoiceId: invoice.id,
+    hasChanges,
+    durationMs: Date.now() - startedAt
+  }, 'invoice change check completed');
+  return hasChanges;
 }
 
 export function updateInvoice(invoice: InvoiceWithFile): boolean {
   if (!invoice.id) return false;
 
+  const startedAt = Date.now();
   const db = getDb();
   const columns = getInvoiceColumns();
   const assignments = [
@@ -177,17 +208,34 @@ export function updateInvoice(invoice: InvoiceWithFile): boolean {
   values.push(invoice.id);
   const stmt = db.prepare(`UPDATE invoices SET ${assignments.join(', ')} WHERE id = ?`);
   const result = stmt.run(...values);
-  return result.changes > 0;
+  const updated = result.changes > 0;
+  logger.info({
+    invoiceId: invoice.id,
+    updated,
+    changes: result.changes,
+    hasFileData: Boolean(invoice.fileData),
+    durationMs: Date.now() - startedAt
+  }, 'invoice updated');
+  return updated;
 }
 
 export function deleteInvoice(id: number): boolean {
+  const startedAt = Date.now();
   const db = getDb();
   const stmt = db.prepare('DELETE FROM invoices WHERE id = ?');
   const result = stmt.run(id);
-  return result.changes > 0;
+  const deleted = result.changes > 0;
+  logger.info({
+    invoiceId: id,
+    deleted,
+    changes: result.changes,
+    durationMs: Date.now() - startedAt
+  }, 'invoice deleted');
+  return deleted;
 }
 
 export function getInvoices(): StoredInvoice[] {
+  const startedAt = Date.now();
   const db = getDb();
   const columns = getInvoiceColumns();
 
@@ -197,7 +245,12 @@ export function getInvoices(): StoredInvoice[] {
     ? `SELECT * FROM invoices ORDER BY date ASC, createdAt ASC`
     : `SELECT * FROM invoices ORDER BY date ASC, id ASC`;
 
-  return db.prepare(query).all();
+  const invoices = db.prepare(query).all();
+  logger.info({
+    count: invoices.length,
+    durationMs: Date.now() - startedAt
+  }, 'invoices fetched');
+  return invoices;
 }
 
 export function getInvoiceFileData(id: number) {

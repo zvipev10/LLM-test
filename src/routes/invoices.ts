@@ -3,6 +3,7 @@ import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
 import { getInvoices, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges } from '../database/invoiceService';
+import { logger } from '../logger';
 
 export const invoiceRouter = Router();
 
@@ -50,6 +51,7 @@ invoiceRouter.post(
 );
 
 invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
+  const startedAt = Date.now();
   try {
     const { invoices } = req.body;
 
@@ -75,6 +77,9 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
 
     const ids: number[] = [];
     let savedCount = 0;
+    let updatedCount = 0;
+    let insertedCount = 0;
+    let unchangedCount = 0;
 
     invoices.forEach((invoice, idx) => {
       if (invoice.id) {
@@ -84,14 +89,29 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
           if (updated) {
             ids.push(invoice.id);
             savedCount += 1;
+            updatedCount += 1;
           }
+        } else {
+          unchangedCount += 1;
         }
       } else {
         const id = saveInvoice(invoice, idx);
         ids.push(id);
         savedCount += 1;
+        insertedCount += 1;
       }
     });
+
+    logger.info({
+      incomingCount: invoices.length,
+      existingCount: existingInvoices.length,
+      savedCount,
+      insertedCount,
+      updatedCount,
+      unchangedCount,
+      deletedCount,
+      durationMs: Date.now() - startedAt
+    }, 'invoice batch saved');
 
     return res.status(200).json({
       success: true,
@@ -101,6 +121,10 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({
+      error: errorMessage,
+      durationMs: Date.now() - startedAt
+    }, 'invoice batch save failed');
     return res.status(500).json({
       success: false,
       error: errorMessage
@@ -109,14 +133,22 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
 });
 
 invoiceRouter.get('/list', (_req: Request, res: Response) => {
+  const startedAt = Date.now();
   try {
     const invoices = getInvoices();
+    logger.info({
+      count: invoices.length,
+      durationMs: Date.now() - startedAt
+    }, 'invoices listed');
     return res.status(200).json({
       success: true,
       invoices
     });
   } catch (error) {
-    console.error('[LIST] Failed to retrieve invoices:', error);
+    logger.error({
+      error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+      durationMs: Date.now() - startedAt
+    }, 'invoice list failed');
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? `${error.name}: ${error.message}` : String(error)

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { logger } from '../logger';
 
 const dataDir = '/app/data';
 const dbPath = path.join(dataDir, 'invoices.db');
@@ -13,7 +14,7 @@ let db = new Database(dbPath);
 
 db.pragma('foreign_keys = ON');
 
-console.log(`📦 Database initialized at: ${dbPath}`);
+logger.info({ dbPath }, 'database connection opened');
 
 function ensureColumn(tableName: string, columnName: string, definition: string) {
   const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
@@ -24,6 +25,7 @@ function ensureColumn(tableName: string, columnName: string, definition: string)
 }
 
 export function initializeDatabase() {
+  const startedAt = Date.now();
   db.exec(`
     CREATE TABLE IF NOT EXISTS invoices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,6 +46,10 @@ export function initializeDatabase() {
   `);
 
   ensureColumn('invoices', 'printed', "TEXT DEFAULT 'לא'");
+  logger.info({
+    dbPath,
+    durationMs: Date.now() - startedAt
+  }, 'database initialized');
 }
 
 export default db;
