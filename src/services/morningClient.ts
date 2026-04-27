@@ -255,7 +255,7 @@ export async function sendInvoiceToMorning(invoice: StoredInvoice) {
     reportingDate: invoiceDate.slice(0, 7) + '-01',
     documentType: Number(process.env.GREEN_INVOICE_EXPENSE_DOCUMENT_TYPE || 20),
     number: String(invoice.id),
-    description: invoice.fileName || `Invoice ${invoice.id}`,
+    description: 'חסר',
     remarks: `Imported from VAT Report invoice ${invoice.id}`,
     supplier: {
       name: invoice.vendorName,
