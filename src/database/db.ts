@@ -46,6 +46,11 @@ export function initializeDatabase() {
   `);
 
   ensureColumn('invoices', 'printed', "TEXT DEFAULT 'לא'");
+  ensureColumn('invoices', 'morningExpenseId', 'TEXT');
+  ensureColumn('invoices', 'morningSyncStatus', 'TEXT');
+  ensureColumn('invoices', 'morningSyncedAt', 'DATETIME');
+  ensureColumn('invoices', 'morningSyncError', 'TEXT');
+
   logger.info({
     dbPath,
     durationMs: Date.now() - startedAt

@@ -2,10 +2,19 @@ import { Router, Request, Response } from 'express';
 import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges } from '../database/invoiceService';
+import { getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus } from '../database/invoiceService';
 import { logger } from '../logger';
+import { sendInvoiceToMorning } from '../services/morningClient';
 
 export const invoiceRouter = Router();
+
+type MorningSyncResult = {
+  invoiceId: number;
+  success: boolean;
+  skipped?: boolean;
+  morningExpenseId?: string | null;
+  error?: string;
+};
 
 invoiceRouter.post(
   '/upload',
@@ -152,6 +161,95 @@ invoiceRouter.get('/list', (_req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    });
+  }
+});
+
+invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  try {
+    const { invoiceIds } = req.body;
+
+    if (!Array.isArray(invoiceIds)) {
+      return res.status(400).json({
+        success: false,
+        error: 'invoiceIds must be an array'
+      });
+    }
+
+    const ids = invoiceIds
+      .map((id: unknown) => Number(id))
+      .filter((id: number) => Number.isInteger(id) && id > 0);
+
+    if (ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid invoice IDs were provided'
+      });
+    }
+
+    const results: MorningSyncResult[] = [];
+
+    for (const id of ids) {
+      const invoice = getInvoiceById(id);
+
+      if (!invoice) {
+        results.push({ invoiceId: id, success: false, error: 'Invoice not found' });
+        continue;
+      }
+
+      if (invoice.morningSyncStatus === 'sent' && invoice.morningExpenseId) {
+        results.push({
+          invoiceId: id,
+          success: true,
+          skipped: true,
+          morningExpenseId: invoice.morningExpenseId
+        });
+        continue;
+      }
+
+      try {
+        const morningResult = await sendInvoiceToMorning(invoice);
+        updateMorningSyncStatus(id, 'sent', morningResult.expenseId, null);
+        results.push({
+          invoiceId: id,
+          success: true,
+          morningExpenseId: morningResult.expenseId
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        updateMorningSyncStatus(id, 'failed', null, errorMessage);
+        results.push({
+          invoiceId: id,
+          success: false,
+          error: errorMessage
+        });
+      }
+    }
+
+    const successCount = results.filter((result) => result.success).length;
+    logger.info({
+      requestedCount: ids.length,
+      successCount,
+      failedCount: results.length - successCount,
+      durationMs: Date.now() - startedAt
+    }, 'invoice morning batch completed');
+
+    return res.status(200).json({
+      success: true,
+      successCount,
+      failedCount: results.length - successCount,
+      results
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({
+      error: errorMessage,
+      durationMs: Date.now() - startedAt
+    }, 'invoice morning batch failed');
+    return res.status(500).json({
+      success: false,
+      error: errorMessage
     });
   }
 });

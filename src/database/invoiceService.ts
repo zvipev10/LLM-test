@@ -11,6 +11,10 @@ export interface StoredInvoice extends InvoiceData {
   status?: string;
   createdAt?: string;
   printed?: string;
+  morningExpenseId?: string | null;
+  morningSyncStatus?: string | null;
+  morningSyncedAt?: string | null;
+  morningSyncError?: string | null;
 }
 
 export interface InvoiceWithFile extends StoredInvoice {
@@ -260,4 +264,31 @@ export function getInvoices(): StoredInvoice[] {
 export function getInvoiceFileData(id: number) {
   const db = getDb();
   return db.prepare('SELECT fileData, mimeType FROM invoices WHERE id = ?').get(id);
+}
+
+export function updateMorningSyncStatus(
+  id: number,
+  status: 'sent' | 'failed',
+  expenseId: string | null,
+  error: string | null
+): boolean {
+  const startedAt = Date.now();
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE invoices
+    SET morningExpenseId = ?,
+        morningSyncStatus = ?,
+        morningSyncedAt = CURRENT_TIMESTAMP,
+        morningSyncError = ?
+    WHERE id = ?
+  `);
+  const result = stmt.run(expenseId, status, error, id);
+  const updated = result.changes > 0;
+  logger.info({
+    invoiceId: id,
+    status,
+    updated,
+    durationMs: Date.now() - startedAt
+  }, 'invoice morning sync status updated');
+  return updated;
 }
