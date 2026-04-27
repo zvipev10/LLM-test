@@ -238,12 +238,16 @@ export function getInvoices(): StoredInvoice[] {
   const startedAt = Date.now();
   const db = getDb();
   const columns = getInvoiceColumns();
+  const selectedColumns = Array.from(columns)
+    .filter((column) => column !== 'fileData')
+    .map((column) => `"${column.replace(/"/g, '""')}"`)
+    .join(', ');
 
   const hasCreatedAt = columns.has('createdAt');
 
   const query = hasCreatedAt
-    ? `SELECT * FROM invoices ORDER BY date ASC, createdAt ASC`
-    : `SELECT * FROM invoices ORDER BY date ASC, id ASC`;
+    ? `SELECT ${selectedColumns} FROM invoices ORDER BY date ASC, createdAt ASC`
+    : `SELECT ${selectedColumns} FROM invoices ORDER BY date ASC, id ASC`;
 
   const invoices = db.prepare(query).all();
   logger.info({
