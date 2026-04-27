@@ -219,6 +219,10 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         updateMorningSyncStatus(id, 'failed', null, errorMessage);
+        logger.error({
+          invoiceId: id,
+          error: errorMessage
+        }, 'invoice morning sync failed');
         results.push({
           invoiceId: id,
           success: false,

@@ -12,8 +12,19 @@ type MorningExpenseResponse = {
   [key: string]: unknown;
 };
 
+type MorningAccountingClassification = {
+  id?: string;
+  key?: string;
+  code?: string;
+  title?: string;
+  type?: number;
+  vat?: number;
+  [key: string]: unknown;
+};
+
 let cachedToken: string | null = null;
 let cachedTokenExpiresAt = 0;
+let cachedAccountingClassifications: MorningAccountingClassification[] | null = null;
 
 function getApiBase() {
   return (process.env.GREEN_INVOICE_API_BASE || 'https://sandbox.d.greeninvoice.co.il/api/v1').replace(/\/$/, '');
@@ -121,6 +132,67 @@ function getExpenseId(response: MorningExpenseResponse) {
   return null;
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function collectAccountingClassifications(value: unknown, results: MorningAccountingClassification[] = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectAccountingClassifications(item, results));
+    return results;
+  }
+
+  if (!isObject(value)) return results;
+
+  if (typeof value.id === 'string' && (typeof value.title === 'string' || typeof value.key === 'string')) {
+    results.push(value as MorningAccountingClassification);
+  }
+
+  Object.values(value).forEach((item) => collectAccountingClassifications(item, results));
+  return results;
+}
+
+async function getAccountingClassifications() {
+  if (cachedAccountingClassifications) {
+    return cachedAccountingClassifications;
+  }
+
+  const startedAt = Date.now();
+  const response = await requestMorning<unknown>('/accounting/classifications/map');
+  cachedAccountingClassifications = collectAccountingClassifications(response);
+
+  logger.info({
+    count: cachedAccountingClassifications.length,
+    durationMs: Date.now() - startedAt
+  }, 'morning accounting classifications fetched');
+
+  return cachedAccountingClassifications;
+}
+
+async function getExpenseAccountingClassification() {
+  const classifications = await getAccountingClassifications();
+  const configuredId = process.env.GREEN_INVOICE_ACCOUNTING_CLASSIFICATION_ID;
+  const configuredKey = process.env.GREEN_INVOICE_ACCOUNTING_CLASSIFICATION_KEY;
+
+  const selected =
+    classifications.find((classification) => configuredId && classification.id === configuredId) ||
+    classifications.find((classification) => configuredKey && classification.key === configuredKey) ||
+    classifications.find((classification) => classification.type === 20) ||
+    classifications[0];
+
+  if (!selected) {
+    throw new Error('Morning expense classification is required, but no accounting classifications were found');
+  }
+
+  logger.info({
+    classificationId: selected.id,
+    classificationKey: selected.key,
+    classificationTitle: selected.title
+  }, 'morning accounting classification selected');
+
+  return selected;
+}
+
 export async function sendInvoiceToMorning(invoice: StoredInvoice) {
   if (!invoice.id) {
     throw new Error('Invoice must be saved before sending to Morning');
@@ -134,6 +206,7 @@ export async function sendInvoiceToMorning(invoice: StoredInvoice) {
 
   const startedAt = Date.now();
   const invoiceDate = formatDate(invoice.date);
+  const accountingClassification = await getExpenseAccountingClassification();
   const payload = {
     paymentType: Number(process.env.GREEN_INVOICE_EXPENSE_PAYMENT_TYPE || 2),
     currency: invoice.currency || 'ILS',
@@ -152,8 +225,10 @@ export async function sendInvoiceToMorning(invoice: StoredInvoice) {
       active: true,
       country: 'IL'
     },
+    accountingClassification,
     active: true,
-    addRecipient: true
+    addRecipient: true,
+    addAccountingClassification: true
   };
 
   const response = await requestMorning<MorningExpenseResponse>('/expenses', {
