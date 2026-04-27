@@ -31,10 +31,10 @@ function validateFileData(invoice: InvoiceWithFile, rowIndex?: number) {
   }
 }
 
-function getInvoiceColumns() {
+function getInvoiceColumns(): Set<string> {
   const db = getDb();
-  const columns = db.prepare('PRAGMA table_info(invoices)').all();
-  return new Set(columns.map((col: any) => col.name));
+  const columns = db.prepare('PRAGMA table_info(invoices)').all() as Array<{ name: string }>;
+  return new Set(columns.map((col) => col.name));
 }
 
 function normalizeComparableValue(value: any) {
