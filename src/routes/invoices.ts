@@ -4,7 +4,7 @@ import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
 import { getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus } from '../database/invoiceService';
 import { logger } from '../logger';
-import { sendInvoiceToMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
+import { getMorningAccountingClassificationOptions, sendInvoiceToMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
 
 export const invoiceRouter = Router();
 
@@ -163,6 +163,35 @@ invoiceRouter.get('/list', (_req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    });
+  }
+});
+
+invoiceRouter.get('/morning/accounting-classifications', async (_req: Request, res: Response) => {
+  const startedAt = Date.now();
+  try {
+    const options = await getMorningAccountingClassificationOptions();
+
+    logger.info({
+      count: options.length,
+      durationMs: Date.now() - startedAt
+    }, 'morning accounting classifications listed');
+
+    return res.status(200).json({
+      success: true,
+      count: options.length,
+      options
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({
+      error: errorMessage,
+      durationMs: Date.now() - startedAt
+    }, 'morning accounting classifications list failed');
+
+    return res.status(500).json({
+      success: false,
+      error: errorMessage
     });
   }
 });

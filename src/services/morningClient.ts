@@ -16,7 +16,10 @@ type MorningAccountingClassification = {
   id?: string;
   key?: string;
   code?: string;
+  name?: string;
   title?: string;
+  irsCode?: number;
+  parentIrsCode?: number;
   type?: number;
   vat?: number;
   [key: string]: unknown;
@@ -181,7 +184,16 @@ function collectAccountingClassifications(value: unknown, results: MorningAccoun
 
   if (!isObject(value)) return results;
 
-  if (typeof value.id === 'string' && (typeof value.title === 'string' || typeof value.key === 'string')) {
+  if (
+    typeof value.id === 'string' &&
+    (
+      typeof value.title === 'string' ||
+      typeof value.name === 'string' ||
+      typeof value.key === 'string' ||
+      typeof value.code === 'string' ||
+      typeof value.code === 'number'
+    )
+  ) {
     results.push(value as MorningAccountingClassification);
   }
 
@@ -204,6 +216,23 @@ async function getAccountingClassifications() {
   }, 'morning accounting classifications fetched');
 
   return cachedAccountingClassifications;
+}
+
+export async function getMorningAccountingClassificationOptions() {
+  const classifications = await getAccountingClassifications();
+
+  return classifications.map((classification) => ({
+    id: classification.id,
+    name: classification.name || classification.title || null,
+    title: classification.title || classification.name || null,
+    key: classification.key || null,
+    code: classification.code ?? null,
+    irsCode: classification.irsCode ?? null,
+    parentIrsCode: classification.parentIrsCode ?? null,
+    type: classification.type ?? null,
+    vat: classification.vat ?? null,
+    raw: classification
+  }));
 }
 
 async function getExpenseAccountingClassification() {
