@@ -1,22 +1,34 @@
 import OpenAI from 'openai';
 import { InvoiceData } from '../types/invoice';
+import type { MorningAccountingClassificationOption } from './morningClient';
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-const EXTRACTION_PROMPT = `You are an invoice and receipt data extraction assistant.
+function buildExtractionPrompt(categories: MorningAccountingClassificationOption[]) {
+  const categoryList = categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    code: category.code
+  }));
 
-STAGE 1 — go through the attached file, row by row and explain in your words what you understand from it. maximum information without skipping any piece of data (dates and numbers values)
+  return `You are an invoice and receipt data extraction assistant.
 
-STAGE 2 — classify each number value in the result of first stage into one of the following:
+STAGE 1 - go through the attached file, row by row and explain in your words what you understand from it. Extract maximum information without skipping any piece of data, especially dates and numeric values.
 
-- vendor name: best guess for the vendor name. if not explicitly stated, try to extract it from the document (e.g. from the header, from the logo, etc.). if logically cannot be extracted, return null
-- total with vat
-- total without vat: if not explicitly stated, calculate from total_with_vat using 18% VAT. if logically cannot be extracted or calculated, return the same value as total_with_vat (assuming the invoice might be VAT-free)
-- date: best fit for the invoice date (not due date, not payment date, etc.). Convert to ISO format (YYYY-MM-DD)
-- currency: if not explicitly stated, assume it's ILS
-- confidence: high, medium, or low
+STAGE 2 - classify each useful value from stage 1 into the following fields:
+
+- vendor name: best guess for the vendor name. If not explicitly stated, try to extract it from the document, such as from the header or logo. If it logically cannot be extracted, return null.
+- total with vat.
+- total without vat: if not explicitly stated, calculate from total_with_vat using 18% VAT. If it logically cannot be extracted or calculated, return the same value as total_with_vat, assuming the invoice might be VAT-free.
+- date: best fit for the invoice date, not due date or payment date. Convert to ISO format (YYYY-MM-DD).
+- currency: if not explicitly stated, assume ILS.
+- Morning category: choose the single best category from the provided Morning category list according to the vendor, document text, invoice/receipt descriptions, and extracted values. Use only an id from this list. If no category reasonably fits, return null for all Morning category fields.
+- confidence: high, medium, or low.
+
+MORNING CATEGORY LIST:
+${JSON.stringify(categoryList, null, 2)}
 
 RESPOND WITH ONLY A VALID JSON OBJECT, NO OTHER TEXT, NO EXPLANATIONS:
 
@@ -26,12 +38,17 @@ RESPOND WITH ONLY A VALID JSON OBJECT, NO OTHER TEXT, NO EXPLANATIONS:
   "totalWithVat": number,
   "totalWithoutVat": number,
   "currency": "ILS",
+  "morningCategoryId": "category id from list or null",
+  "morningCategoryName": "category name from list or null",
+  "morningCategoryCode": number,
   "confidence": "high" | "medium" | "low"
 }`;
+}
 
 export async function extractInvoiceData(
   fileBuffer: Buffer,
-  mimeType: string
+  mimeType: string,
+  categories: MorningAccountingClassificationOption[] = []
 ): Promise<InvoiceData> {
   if (!mimeType.startsWith('image/')) {
     throw new Error(`Invalid MIME type after preprocessing: ${mimeType}`);
@@ -53,12 +70,12 @@ export async function extractInvoiceData(
           },
           {
             type: 'input_text',
-            text: EXTRACTION_PROMPT,
+            text: buildExtractionPrompt(categories),
           }
         ]
       }
     ],
-    max_output_tokens: 500,
+    max_output_tokens: 700,
     temperature: 0,
   });
 

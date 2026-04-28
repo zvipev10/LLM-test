@@ -4,6 +4,9 @@ export interface InvoiceData {
   totalWithVat: number | null;
   totalWithoutVat: number | null;
   currency: string | null;
+  morningCategoryId?: string | null;
+  morningCategoryName?: string | null;
+  morningCategoryCode?: number | null;
   confidence: 'high' | 'medium' | 'low';
 }
 

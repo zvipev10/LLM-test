@@ -1,5 +1,27 @@
 import { extractInvoiceData } from './openai';
 import { convertPdfToImage } from './pdf';
+import { getMorningAccountingClassificationOptions } from './morningClient';
+import type { MorningAccountingClassificationOption } from './morningClient';
+
+function normalizeExtractedCategory(invoiceData: any, categories: MorningAccountingClassificationOption[]) {
+  const selected = categories.find((category) => category.id === invoiceData.morningCategoryId);
+  if (!selected) {
+    invoiceData.morningCategoryId = null;
+    invoiceData.morningCategoryName = null;
+    invoiceData.morningCategoryCode = null;
+    return;
+  }
+
+  invoiceData.morningCategoryId = selected.id;
+  invoiceData.morningCategoryName = selected.name;
+  if (selected.code === null || selected.code === undefined) {
+    invoiceData.morningCategoryCode = null;
+    return;
+  }
+
+  const numericCode = typeof selected.code === 'number' ? selected.code : Number(selected.code);
+  invoiceData.morningCategoryCode = Number.isFinite(numericCode) ? numericCode : null;
+}
 
 function getPngHeaderHex(buffer: Buffer) {
   return buffer.slice(0, 8).toString('hex');
@@ -39,7 +61,9 @@ export async function processInvoiceFile(
   }
 
   try {
-    const invoiceData = await extractInvoiceData(imageBuffer, imageMimeType);
+    const categories = await getMorningAccountingClassificationOptions();
+    const invoiceData = await extractInvoiceData(imageBuffer, imageMimeType, categories);
+    normalizeExtractedCategory(invoiceData, categories);
 
     return {
       success: true,

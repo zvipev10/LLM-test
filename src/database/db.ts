@@ -53,6 +53,9 @@ export function initializeDatabase() {
   ensureColumn('invoices', 'morningFileSyncStatus', 'TEXT');
   ensureColumn('invoices', 'morningFileSyncedAt', 'DATETIME');
   ensureColumn('invoices', 'morningFileSyncError', 'TEXT');
+  ensureColumn('invoices', 'morningCategoryId', 'TEXT');
+  ensureColumn('invoices', 'morningCategoryName', 'TEXT');
+  ensureColumn('invoices', 'morningCategoryCode', 'INTEGER');
 
   logger.info({
     dbPath,

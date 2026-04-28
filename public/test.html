@@ -39,6 +39,16 @@
       color: #1c1c1e;
       background: #f9f9f9;
     }
+    select {
+      width: 100%;
+      max-width: 260px;
+      padding: 8px 10px;
+      border: 1px solid #e5e5ea;
+      border-radius: 10px;
+      font-size: 14px;
+      color: #1c1c1e;
+      background: #f9f9f9;
+    }
     .file-area {
       border: 2px dashed #c7c7cc;
       border-radius: 12px;
@@ -147,6 +157,7 @@
   </div>
 
   <button id="sendBtn" onclick="sendRequest()" disabled>Upload & Extract</button>
+  <button id="saveBtn" onclick="saveResults()" style="display:none; margin-top: 10px;">Save Results</button>
 
   <div class="spinner" id="spinner">⏳ Processing invoices...</div>
 
@@ -155,6 +166,75 @@
   <div id="results"></div>
 
   <script>
+    let morningCategories = [];
+
+    function getSiblingEndpoint(uploadUrl, endpoint) {
+      return uploadUrl.replace(/\/upload\/?$/, endpoint);
+    }
+
+    async function loadMorningCategories(uploadUrl) {
+      const response = await fetch(getSiblingEndpoint(uploadUrl, '/morning/accounting-classifications'));
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to load Morning categories');
+      }
+      morningCategories = data.options || [];
+    }
+
+    function updateResultCategory(resultIndex, select) {
+      const result = window.currentUploadResults?.[resultIndex];
+      if (!result?.success) return;
+
+      const selected = morningCategories.find(category => category.id === select.value);
+      result.data.morningCategoryId = selected?.id || null;
+      result.data.morningCategoryName = selected?.name || null;
+      result.data.morningCategoryCode = selected?.code ?? null;
+    }
+
+    function categorySelectHtml(selectedId, resultIndex) {
+      const options = [
+        '<option value="">Choose category</option>',
+        ...morningCategories.map(category => {
+          const selected = category.id === selectedId ? ' selected' : '';
+          const label = `${category.name || category.title || category.id}${category.code ? ` (${category.code})` : ''}`;
+          return `<option value="${category.id}"${selected}>${label}</option>`;
+        })
+      ].join('');
+
+      return `<select onchange="updateResultCategory(${resultIndex}, this)">${options}</select>`;
+    }
+
+    async function saveResults() {
+      const url = document.getElementById('apiUrl').value.trim();
+      const results = window.currentUploadResults || [];
+      const invoices = results
+        .filter(result => result.success)
+        .map(result => ({
+          ...result.data,
+          fileName: result.filename,
+          mimeType: result.mimeType,
+          fileData: result.fileData
+        }));
+
+      if (!invoices.length) return;
+
+      document.getElementById('saveBtn').disabled = true;
+      try {
+        const response = await fetch(getSiblingEndpoint(url, '/save-batch'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invoices })
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Save failed');
+        alert(data.message || 'Saved');
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        document.getElementById('saveBtn').disabled = false;
+      }
+    }
+
     function handleFiles(input) {
       const files = Array.from(input.files);
       if (!files.length) return;
@@ -177,9 +257,12 @@
       document.getElementById('sendBtn').disabled = true;
       document.getElementById('spinner').style.display = 'block';
       document.getElementById('summary').style.display = 'none';
+      document.getElementById('saveBtn').style.display = 'none';
       document.getElementById('results').innerHTML = '';
 
       try {
+        await loadMorningCategories(url);
+
         const formData = new FormData();
         files.forEach(file => formData.append('invoices', file));
 
@@ -209,17 +292,19 @@
         return;
       }
 
+      window.currentUploadResults = data.results;
       const succeeded = data.results.filter(r => r.success).length;
       const failed = data.results.filter(r => !r.success).length;
 
       const summary = document.getElementById('summary');
       summary.style.display = 'block';
+      document.getElementById('saveBtn').style.display = succeeded > 0 ? 'block' : 'none';
       summary.innerHTML = `
         <h2>✅ Processed ${data.total} file${data.total > 1 ? 's' : ''}</h2>
         <p>${succeeded} succeeded${failed > 0 ? ` · ${failed} failed` : ''}</p>
       `;
 
-      document.getElementById('results').innerHTML = data.results.map(r => {
+      document.getElementById('results').innerHTML = data.results.map((r, index) => {
         if (!r.success) {
           return `
             <div class="result-card error">
@@ -242,6 +327,10 @@
             <div class="field">
               <span class="field-name">Vendor</span>
               <span class="field-value">${fmt(d.vendorName)}</span>
+            </div>
+            <div class="field">
+              <span class="field-name">Morning Category</span>
+              <span class="field-value">${categorySelectHtml(d.morningCategoryId, index)}</span>
             </div>
             <div class="field">
               <span class="field-name">Date</span>

@@ -6,10 +6,17 @@ import { invoiceRouter } from './routes/invoices';
 import { gmailRouter } from './routes/gmail';
 import { initializeDatabase } from './database/db';
 import { logger } from './logger';
+import { initializeMorningAccountingClassifications } from './services/morningClient';
 
 dotenv.config();
 
 initializeDatabase();
+
+initializeMorningAccountingClassifications().catch((error) => {
+  logger.error({
+    error: error instanceof Error ? error.message : String(error)
+  }, 'morning accounting classifications startup refresh failed');
+});
 
 const app = express();
 const PORT = process.env.PORT || 8080;

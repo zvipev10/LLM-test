@@ -18,6 +18,9 @@ export interface StoredInvoice extends InvoiceData {
   morningFileSyncStatus?: string | null;
   morningFileSyncedAt?: string | null;
   morningFileSyncError?: string | null;
+  morningCategoryId?: string | null;
+  morningCategoryName?: string | null;
+  morningCategoryCode?: number | null;
 }
 
 export interface InvoiceWithFile extends StoredInvoice {
@@ -59,6 +62,7 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
   const hasConfidence = columns.has('confidence');
   const hasStatus = columns.has('status');
   const hasPrinted = columns.has('printed');
+  const hasMorningCategory = columns.has('morningCategoryId') && columns.has('morningCategoryName') && columns.has('morningCategoryCode');
 
   const insertColumns = [
     'fileName',
@@ -96,6 +100,15 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
   if (hasPrinted) {
     insertColumns.push('printed');
     values.push(invoice.printed || 'לא');
+  }
+
+  if (hasMorningCategory) {
+    insertColumns.push('morningCategoryId', 'morningCategoryName', 'morningCategoryCode');
+    values.push(
+      invoice.morningCategoryId ?? null,
+      invoice.morningCategoryName ?? null,
+      invoice.morningCategoryCode ?? null
+    );
   }
 
   const placeholders = insertColumns.map(() => '?').join(', ');
@@ -152,6 +165,12 @@ export function hasInvoiceChanges(invoice: InvoiceWithFile): boolean {
     [existing.printed, invoice.printed || 'לא']
   ];
 
+  comparisons.push(
+    [existing.morningCategoryId, invoice.morningCategoryId ?? null],
+    [existing.morningCategoryName, invoice.morningCategoryName ?? null],
+    [existing.morningCategoryCode, invoice.morningCategoryCode ?? null]
+  );
+
   const hasChanges = comparisons.some(([currentValue, incomingValue]) => {
     return normalizeComparableValue(currentValue) !== normalizeComparableValue(incomingValue);
   });
@@ -207,6 +226,18 @@ export function updateInvoice(invoice: InvoiceWithFile): boolean {
   if (columns.has('printed')) {
     assignments.push('printed = ?');
     values.push(invoice.printed || 'לא');
+  }
+  if (columns.has('morningCategoryId')) {
+    assignments.push('morningCategoryId = ?');
+    values.push(invoice.morningCategoryId ?? null);
+  }
+  if (columns.has('morningCategoryName')) {
+    assignments.push('morningCategoryName = ?');
+    values.push(invoice.morningCategoryName ?? null);
+  }
+  if (columns.has('morningCategoryCode')) {
+    assignments.push('morningCategoryCode = ?');
+    values.push(invoice.morningCategoryCode ?? null);
   }
   if (columns.has('updatedAt')) {
     assignments.push('updatedAt = CURRENT_TIMESTAMP');
