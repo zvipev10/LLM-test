@@ -172,6 +172,15 @@
       return uploadUrl.replace(/\/upload\/?$/, endpoint);
     }
 
+    async function fetchExistingInvoices(uploadUrl) {
+      const response = await fetch(getSiblingEndpoint(uploadUrl, '/list'));
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to load existing invoices');
+      }
+      return data.invoices || [];
+    }
+
     async function loadMorningCategories(uploadUrl) {
       const response = await fetch(getSiblingEndpoint(uploadUrl, '/morning/accounting-classifications'));
       const data = await response.json();
@@ -207,7 +216,7 @@
     async function saveResults() {
       const url = document.getElementById('apiUrl').value.trim();
       const results = window.currentUploadResults || [];
-      const invoices = results
+      const newInvoices = results
         .filter(result => result.success)
         .map(result => ({
           ...result.data,
@@ -216,10 +225,13 @@
           fileData: result.fileData
         }));
 
-      if (!invoices.length) return;
+      if (!newInvoices.length) return;
 
       document.getElementById('saveBtn').disabled = true;
       try {
+        const existingInvoices = await fetchExistingInvoices(url);
+        const invoices = [...existingInvoices, ...newInvoices];
+
         const response = await fetch(getSiblingEndpoint(url, '/save-batch'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
