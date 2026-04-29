@@ -38,6 +38,18 @@ function looksLikePdf(fileBuffer: Buffer, mimeType: string, fileName: string) {
   );
 }
 
+function normalizeOriginalMimeType(fileBuffer: Buffer, mimeType: string, fileName: string) {
+  const lowerName = (fileName || '').toLowerCase();
+  const pdfSignature = fileBuffer.slice(0, 5).toString('utf8') === '%PDF-';
+  const pngSignature = fileBuffer.slice(0, 8).toString('hex').startsWith('89504e47');
+  const jpgSignature = fileBuffer.slice(0, 3).toString('hex') === 'ffd8ff';
+
+  if (pdfSignature || lowerName.endsWith('.pdf')) return 'application/pdf';
+  if (pngSignature || lowerName.endsWith('.png')) return 'image/png';
+  if (jpgSignature || lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) return 'image/jpeg';
+  return mimeType;
+}
+
 export async function processInvoiceFile(
   fileBuffer: Buffer,
   mimeType: string,
@@ -68,7 +80,7 @@ export async function processInvoiceFile(
     return {
       success: true,
       filename: fileName,
-      mimeType,
+      mimeType: normalizeOriginalMimeType(fileBuffer, mimeType, fileName),
       data: invoiceData,
       fileData: fileBuffer.toString('base64')
     };
