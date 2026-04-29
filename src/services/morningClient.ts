@@ -54,6 +54,18 @@ type MorningFileUploadUrlResponse = {
   fields?: Record<string, string | number | boolean>;
 };
 
+class MorningApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly path: string,
+    public readonly body: unknown
+  ) {
+    super(message);
+    this.name = 'MorningApiError';
+  }
+}
+
 let cachedToken: string | null = null;
 let cachedTokenExpiresAt = 0;
 let cachedAccountingClassifications: MorningAccountingClassification[] | null = null;
@@ -116,7 +128,7 @@ async function requestMorning<T>(path: string, options: RequestInit = {}, useAut
         : typeof body === 'object' && body !== null && 'error' in body
           ? String((body as { error?: unknown }).error)
         : JSON.stringify(body);
-    throw new Error(`Morning API ${response.status}: ${message}`);
+    throw new MorningApiError(`Morning API ${response.status}: ${message}`, response.status, path, body);
   }
 
   return body as T;
@@ -363,10 +375,35 @@ export async function sendInvoiceToMorning(invoice: StoredInvoice) {
     addAccountingClassification: true
   };
 
-  const response = await requestMorning<MorningExpenseResponse>('/expenses', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
+  let response: MorningExpenseResponse;
+  try {
+    response = await requestMorning<MorningExpenseResponse>('/expenses', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  } catch (error) {
+    logger.error({
+      invoiceId: invoice.id,
+      vendorName: invoice.vendorName,
+      date: invoice.date,
+      totalWithVat: invoice.totalWithVat,
+      totalWithoutVat: invoice.totalWithoutVat,
+      vat: invoice.vat,
+      morningCategoryId: invoice.morningCategoryId,
+      payload,
+      morningError: error instanceof MorningApiError
+        ? {
+            message: error.message,
+            status: error.status,
+            path: error.path,
+            body: error.body
+          }
+        : {
+            message: error instanceof Error ? error.message : String(error)
+          }
+    }, 'morning expense request failed');
+    throw error;
+  }
 
   const expenseId = getExpenseId(response);
   logger.info({
