@@ -43,7 +43,8 @@ async function fetchInvoiceLinkAsFile(url: string, fallbackName: string) {
     return {
       buffer,
       mimeType: contentType,
-      fileName: getFileNameFromUrl(url, fallbackName)
+      fileName: getFileNameFromUrl(url, fallbackName),
+      sourceKind: 'linked_file' as const
     };
   }
 
@@ -56,7 +57,8 @@ async function fetchInvoiceLinkAsFile(url: string, fallbackName: string) {
       ...pageText.split('\n').filter(Boolean)
     ]),
     mimeType: 'application/pdf',
-    fileName: fallbackName.toLowerCase().endsWith('.pdf') ? fallbackName : `${fallbackName}.pdf`
+    fileName: fallbackName.toLowerCase().endsWith('.pdf') ? fallbackName : `${fallbackName}.pdf`,
+    sourceKind: 'linked_page' as const
   };
 }
 
@@ -128,7 +130,7 @@ gmailRouter.post('/sync', async (req, res) => {
             results.push({
               ...processed,
               source: 'gmail',
-              gmailResolution: 'linked_invoice',
+              gmailResolution: linkedFile.sourceKind,
               gmailSourceUrl: resolution.selectedLink
             });
             continue;
