@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, createSimplePdfBuffer, stripHtml } from '../services/gmailService';
+import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, createSimplePdfBuffer } from '../services/gmailService';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { resolveGmailInvoiceSource } from '../services/openai';
+import { renderPageToPdf } from '../services/browserRenderer';
 
 export const gmailRouter = Router();
 
@@ -48,14 +49,8 @@ async function fetchInvoiceLinkAsFile(url: string, fallbackName: string) {
     };
   }
 
-  const html = buffer.toString('utf8');
-  const pageText = stripHtml(html);
   return {
-    buffer: createSimplePdfBuffer([
-      `Source URL: ${url}`,
-      '',
-      ...pageText.split('\n').filter(Boolean)
-    ]),
+    buffer: await renderPageToPdf(url),
     mimeType: 'application/pdf',
     fileName: fallbackName.toLowerCase().endsWith('.pdf') ? fallbackName : `${fallbackName}.pdf`,
     sourceKind: 'linked_page' as const
