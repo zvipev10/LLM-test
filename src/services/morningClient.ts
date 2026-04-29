@@ -26,6 +26,16 @@ type MorningAccountingClassification = {
   [key: string]: unknown;
 };
 
+type MorningExpenseAccountingClassification = {
+  id: string;
+  key: string;
+  code: string;
+  title: string;
+  irsCode: number;
+  type: number;
+  vat: number;
+};
+
 export type MorningAccountingClassificationOption = {
   id: string;
   name: string | null;
@@ -255,6 +265,33 @@ function toAccountingClassificationOption(classification: MorningAccountingClass
   };
 }
 
+function normalizeExpenseAccountingClassification(
+  classification: MorningAccountingClassification
+): MorningExpenseAccountingClassification {
+  const code = classification.code ?? classification.key;
+  const irsCode = typeof classification.irsCode === 'number'
+    ? classification.irsCode
+    : Number(code);
+  const parentCode = classification.parentIrsCode ?? classification.code ?? classification.key ?? irsCode;
+
+  if (!classification.id) {
+    throw new Error('Selected Morning category is missing an ID');
+  }
+  if (!Number.isFinite(irsCode)) {
+    throw new Error('Selected Morning category is missing a numeric code');
+  }
+
+  return {
+    id: classification.id,
+    key: classification.key || String(code),
+    code: String(parentCode),
+    title: classification.title || classification.name || String(code),
+    irsCode,
+    type: classification.type ?? 20,
+    vat: classification.vat ?? 100
+  };
+}
+
 export async function getMorningAccountingClassificationOptions() {
   const classifications = await getAccountingClassifications();
 
@@ -273,7 +310,7 @@ async function getExpenseAccountingClassification(categoryId: string) {
     throw new Error('Selected Morning category is not available');
   }
 
-  return selected;
+  return normalizeExpenseAccountingClassification(selected);
 }
 
 export async function sendInvoiceToMorning(invoice: StoredInvoice) {
@@ -293,6 +330,15 @@ export async function sendInvoiceToMorning(invoice: StoredInvoice) {
   const startedAt = Date.now();
   const invoiceDate = formatDate(invoice.date);
   const accountingClassification = await getExpenseAccountingClassification(invoice.morningCategoryId);
+  logger.info({
+    invoiceId: invoice.id,
+    classificationId: accountingClassification.id,
+    classificationKey: accountingClassification.key,
+    classificationCode: accountingClassification.code,
+    classificationTitle: accountingClassification.title,
+    classificationIrsCode: accountingClassification.irsCode
+  }, 'morning accounting classification prepared for expense');
+
   const payload = {
     paymentType: Number(process.env.GREEN_INVOICE_EXPENSE_PAYMENT_TYPE || 11),
     currency: invoice.currency || 'ILS',
