@@ -45,6 +45,106 @@ RESPOND WITH ONLY A VALID JSON OBJECT, NO OTHER TEXT, NO EXPLANATIONS:
 }`;
 }
 
+export type GmailInvoiceResolution = {
+  kind: 'invoice_body' | 'invoice_link' | 'not_invoice';
+  selectedLink: string | null;
+  reason: string | null;
+};
+
+function buildGmailInvoiceResolutionPrompt(params: {
+  subject: string;
+  fromAddress: string;
+  textBody: string;
+  htmlText: string;
+  links: Array<{ url: string; text: string; source: string }>;
+}) {
+  const maxBodyChars = 12_000;
+  const textBody = params.textBody.slice(0, maxBodyChars);
+  const htmlText = params.htmlText.slice(0, maxBodyChars);
+  const links = params.links.slice(0, 40);
+
+  return `You inspect Gmail messages that may contain invoices.
+
+Decide whether this email:
+1. is itself an invoice/receipt in the email body,
+2. contains a link that should be opened to get the invoice/receipt,
+3. is not an invoice.
+
+Prefer invoice_link when there is a clear download/view invoice link.
+Choose only one selectedLink, and only from the provided links.
+If the email body contains the full invoice details such as vendor, date, amount, tax/VAT, or receipt/invoice number, use invoice_body.
+If it is not invoice-related, use not_invoice.
+
+EMAIL:
+Subject: ${params.subject}
+From: ${params.fromAddress}
+
+TEXT BODY:
+${textBody}
+
+HTML TEXT:
+${htmlText}
+
+LINKS:
+${JSON.stringify(links, null, 2)}
+
+RESPOND WITH ONLY A VALID JSON OBJECT:
+
+{
+  "kind": "invoice_body" | "invoice_link" | "not_invoice",
+  "selectedLink": "exact url from LINKS or null",
+  "reason": "short reason"
+}`;
+}
+
+export async function resolveGmailInvoiceSource(params: {
+  subject: string;
+  fromAddress: string;
+  textBody: string;
+  htmlText: string;
+  links: Array<{ url: string; text: string; source: string }>;
+}): Promise<GmailInvoiceResolution> {
+  const response = await client.responses.create({
+    model: 'gpt-5.4',
+    input: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: buildGmailInvoiceResolutionPrompt(params),
+          }
+        ]
+      }
+    ],
+    max_output_tokens: 300,
+    temperature: 0,
+  });
+
+  const content = response.output_text;
+  if (!content) throw new Error('No response from OpenAI');
+
+  const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  const parsed = JSON.parse(cleaned) as GmailInvoiceResolution;
+
+  if (!['invoice_body', 'invoice_link', 'not_invoice'].includes(parsed.kind)) {
+    throw new Error(`Invalid Gmail invoice resolution kind: ${parsed.kind}`);
+  }
+
+  if (parsed.kind === 'invoice_link') {
+    const selected = params.links.find((link) => link.url === parsed.selectedLink);
+    if (!selected) {
+      throw new Error('OpenAI selected a link that was not provided');
+    }
+  }
+
+  return {
+    kind: parsed.kind,
+    selectedLink: parsed.selectedLink || null,
+    reason: parsed.reason || null
+  };
+}
+
 export async function extractInvoiceData(
   fileBuffer: Buffer,
   mimeType: string,

@@ -51,6 +51,84 @@ function collectAttachments(parts: any[] | undefined): any[] {
   return result
 }
 
+function decodeGmailBodyData(data: string | undefined) {
+  if (!data) return ''
+  return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
+}
+
+export function stripHtml(html: string) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s+/g, '\n')
+    .trim()
+}
+
+function collectBodyParts(payload: any) {
+  const textParts: string[] = []
+  const htmlParts: string[] = []
+
+  const walk = (part: any) => {
+    if (!part) return
+
+    if (part.mimeType === 'text/plain' && part.body?.data) {
+      textParts.push(decodeGmailBodyData(part.body.data))
+    }
+
+    if (part.mimeType === 'text/html' && part.body?.data) {
+      htmlParts.push(decodeGmailBodyData(part.body.data))
+    }
+
+    if (part.parts) {
+      part.parts.forEach(walk)
+    }
+  }
+
+  walk(payload)
+
+  return {
+    textBody: textParts.join('\n\n').trim(),
+    htmlBody: htmlParts.join('\n\n').trim()
+  }
+}
+
+function extractLinks(textBody: string, htmlBody: string) {
+  const links: Array<{ url: string; text: string; source: 'html' | 'text' }> = []
+  const seen = new Set<string>()
+
+  const addLink = (url: string, text: string, source: 'html' | 'text') => {
+    const cleanUrl = url.trim()
+    if (!cleanUrl || seen.has(cleanUrl)) return
+    seen.add(cleanUrl)
+    links.push({ url: cleanUrl, text: text.trim(), source })
+  }
+
+  const anchorRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+  let anchorMatch: RegExpExecArray | null
+  while ((anchorMatch = anchorRegex.exec(htmlBody)) !== null) {
+    addLink(anchorMatch[1], stripHtml(anchorMatch[2]), 'html')
+  }
+
+  const urlRegex = /https?:\/\/[^\s"'<>]+/gi
+  const combinedText = `${textBody}\n${stripHtml(htmlBody)}`
+  let urlMatch: RegExpExecArray | null
+  while ((urlMatch = urlRegex.exec(combinedText)) !== null) {
+    addLink(urlMatch[0].replace(/[),.;]+$/g, ''), '', 'text')
+  }
+
+  return links
+}
+
 async function getExactLabelId(labelName: string): Promise<string | null> {
   const gmail = getGmailClient()
   const labelsRes = await gmail.users.labels.list({ userId: 'me' })
@@ -82,6 +160,9 @@ export async function fetchEmails() {
     const payload = full.data.payload
     const headers = payload?.headers || []
     const attachments = collectAttachments(payload?.parts)
+    const { textBody, htmlBody } = collectBodyParts(payload)
+    const htmlText = stripHtml(htmlBody)
+    const links = extractLinks(textBody, htmlBody)
     const labelIds = full.data.labelIds || []
 
     return {
@@ -90,6 +171,10 @@ export async function fetchEmails() {
       fromAddress: extractHeader(headers, 'From'),
       receivedAt: extractHeader(headers, 'Date'),
       snippet: full.data.snippet || '',
+      textBody,
+      htmlBody,
+      htmlText,
+      links,
       attachments,
       labelIds
     }
@@ -110,7 +195,16 @@ function escapePdfText(value: string) {
 }
 
 export function createSimplePdfBuffer(lines: string[]): Buffer {
-  const content = lines.map((l, i) => `BT /F1 12 Tf 50 ${760 - i * 20} Td (${escapePdfText(l)}) Tj ET`).join('\n')
+  const wrappedLines = lines.flatMap((line) => {
+    const chunks: string[] = []
+    const value = line || ''
+    for (let i = 0; i < value.length; i += 95) {
+      chunks.push(value.slice(i, i + 95))
+    }
+    return chunks.length > 0 ? chunks : ['']
+  }).slice(0, 34)
+
+  const content = wrappedLines.map((l, i) => `BT /F1 12 Tf 50 ${760 - i * 20} Td (${escapePdfText(l)}) Tj ET`).join('\n')
   const stream = `${content}\n`
 
   const pdf = `%PDF-1.4

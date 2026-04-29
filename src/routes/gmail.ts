@@ -1,8 +1,64 @@
 import { Router } from 'express';
-import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, createSimplePdfBuffer } from '../services/gmailService';
+import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, createSimplePdfBuffer, stripHtml } from '../services/gmailService';
 import { processInvoiceFile } from '../services/processInvoiceFile';
+import { resolveGmailInvoiceSource } from '../services/openai';
 
 export const gmailRouter = Router();
+
+function sanitizeFileName(value: string) {
+  return value.replace(/[\\/:*?"<>|]+/g, '-').trim().slice(0, 120) || 'mail';
+}
+
+function getMimeTypeFromUrl(url: string) {
+  const pathname = new URL(url).pathname.toLowerCase();
+  if (pathname.endsWith('.pdf')) return 'application/pdf';
+  if (pathname.endsWith('.png')) return 'image/png';
+  if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) return 'image/jpeg';
+  if (pathname.endsWith('.webp')) return 'image/webp';
+  return null;
+}
+
+function getFileNameFromUrl(url: string, fallback: string) {
+  const pathname = new URL(url).pathname;
+  const lastSegment = decodeURIComponent(pathname.split('/').filter(Boolean).pop() || '');
+  return sanitizeFileName(lastSegment || fallback);
+}
+
+async function fetchInvoiceLinkAsFile(url: string, fallbackName: string) {
+  const response = await fetch(url);
+  const mimeTypeFromUrl = getMimeTypeFromUrl(url);
+  const responseContentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+  const contentType = responseContentType === 'application/octet-stream'
+    ? mimeTypeFromUrl || responseContentType
+    : responseContentType || mimeTypeFromUrl || 'text/html';
+
+  if (!response.ok) {
+    throw new Error(`Invoice link returned ${response.status}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  if (contentType === 'application/pdf' || contentType.startsWith('image/')) {
+    return {
+      buffer,
+      mimeType: contentType,
+      fileName: getFileNameFromUrl(url, fallbackName)
+    };
+  }
+
+  const html = buffer.toString('utf8');
+  const pageText = stripHtml(html);
+  return {
+    buffer: createSimplePdfBuffer([
+      `Source URL: ${url}`,
+      '',
+      ...pageText.split('\n').filter(Boolean)
+    ]),
+    mimeType: 'application/pdf',
+    fileName: fallbackName.toLowerCase().endsWith('.pdf') ? fallbackName : `${fallbackName}.pdf`
+  };
+}
 
 gmailRouter.get('/connect', (req, res) => {
   res.redirect(getAuthUrl());
@@ -45,14 +101,50 @@ gmailRouter.post('/sync', async (req, res) => {
         }
       } else {
         try {
-          const pdfBuffer = createSimplePdfBuffer([
+          const resolution = await resolveGmailInvoiceSource({
+            subject: email.subject,
+            fromAddress: email.fromAddress,
+            textBody: email.textBody,
+            htmlText: email.htmlText,
+            links: email.links
+          });
+
+          if (resolution.kind === 'not_invoice') {
+            results.push({
+              success: false,
+              skipped: true,
+              filename: `${sanitizeFileName(email.subject || 'mail')}.pdf`,
+              error: resolution.reason || 'Email does not look like an invoice'
+            });
+            continue;
+          }
+
+          if (resolution.kind === 'invoice_link' && resolution.selectedLink) {
+            const linkedFile = await fetchInvoiceLinkAsFile(
+              resolution.selectedLink,
+              sanitizeFileName(email.subject || 'invoice-from-link')
+            );
+            const processed = await processInvoiceFile(linkedFile.buffer, linkedFile.mimeType, linkedFile.fileName);
+            results.push({
+              ...processed,
+              source: 'gmail',
+              gmailResolution: 'linked_invoice',
+              gmailSourceUrl: resolution.selectedLink
+            });
+            continue;
+          }
+
+          const bodyLines = [
             `Subject: ${email.subject}`,
             `From: ${email.fromAddress}`,
-            email.snippet
-          ]);
+            `Date: ${email.receivedAt}`,
+            '',
+            ...(email.textBody || email.htmlText || email.snippet).split('\n').filter(Boolean)
+          ];
 
-          const processed = await processInvoiceFile(pdfBuffer, 'application/pdf', `${email.subject || 'mail'}.pdf`);
-          results.push({ ...processed, source: 'gmail' });
+          const pdfBuffer = createSimplePdfBuffer(bodyLines);
+          const processed = await processInvoiceFile(pdfBuffer, 'application/pdf', `${sanitizeFileName(email.subject || 'mail')}.pdf`);
+          results.push({ ...processed, source: 'gmail', gmailResolution: 'email_body' });
         } catch (err: any) {
           results.push({ success: false, filename: `${email.subject || 'mail'}.pdf`, error: err.message });
         }
