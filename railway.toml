@@ -1,5 +1,8 @@
 [build]
-builder = "DOCKERFILE"
+builder = "nixpacks"
+
+[build.nixpacks]
+providers = ["nodejs"]
 
 [deploy]
 startCommand = "npm run start"
