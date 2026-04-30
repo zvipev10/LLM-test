@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, createSimplePdfBuffer } from '../services/gmailService';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { resolveGmailInvoiceSource } from '../services/openai';
-import { renderPageToPdf } from '../services/browserRenderer';
+import { renderHtmlToPdf, renderPageToPdf } from '../services/browserRenderer';
 import { logger } from '../logger';
 
 export const gmailRouter = Router();
@@ -218,21 +218,33 @@ gmailRouter.post('/sync', async (req, res) => {
             continue;
           }
 
-          const bodyLines = [
-            `Subject: ${email.subject}`,
-            `From: ${email.fromAddress}`,
-            `Date: ${email.receivedAt}`,
-            '',
-            ...(email.textBody || email.htmlText || email.snippet).split('\n').filter(Boolean)
-          ];
+          let pdfBuffer: Buffer;
+          if (email.htmlBody) {
+            const rendered = await renderHtmlToPdf(email.htmlBody);
+            pdfBuffer = rendered.buffer;
+            gmailDebug.renderFinalUrl = rendered.finalUrl;
+            gmailDebug.renderTitle = rendered.title;
+            gmailDebug.renderBodyPreview = rendered.bodyPreview;
+            gmailDebug.renderPdfBytes = rendered.pdfBytes;
+          } else {
+            const bodyLines = [
+              `Subject: ${email.subject}`,
+              `From: ${email.fromAddress}`,
+              `Date: ${email.receivedAt}`,
+              '',
+              ...(email.textBody || email.htmlText || email.snippet).split('\n').filter(Boolean)
+            ];
+            pdfBuffer = createSimplePdfBuffer(bodyLines);
+          }
 
-          const pdfBuffer = createSimplePdfBuffer(bodyLines);
           const processed = await processInvoiceFile(pdfBuffer, 'application/pdf', `${sanitizeFileName(email.subject || 'mail')}.pdf`);
           gmailDebug.path = 'email_body';
           logger.info({
             ...baseDebug,
             path: 'email_body',
-            pdfBytes: pdfBuffer.length
+            pdfBytes: pdfBuffer.length,
+            renderTitle: gmailDebug.renderTitle,
+            renderBodyPreview: gmailDebug.renderBodyPreview
           }, 'gmail sync email body processed');
           results.push({ ...processed, source: 'gmail', gmailResolution: 'email_body', gmailDebug });
         } catch (err: any) {
