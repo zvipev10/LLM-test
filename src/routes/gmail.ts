@@ -39,6 +39,7 @@ type GmailDebug = {
   renderTitle?: string;
   renderBodyPreview?: string;
   renderPdfBytes?: number;
+  renderCaptureMethod?: string;
   error?: string;
 };
 
@@ -80,6 +81,7 @@ async function fetchInvoiceLinkAsFile(url: string, fallbackName: string, debug: 
   debug.renderTitle = rendered.title;
   debug.renderBodyPreview = rendered.bodyPreview;
   debug.renderPdfBytes = rendered.pdfBytes;
+  debug.renderCaptureMethod = rendered.captureMethod;
 
   return {
     buffer: rendered.buffer,
@@ -226,6 +228,7 @@ gmailRouter.post('/sync', async (req, res) => {
             gmailDebug.renderTitle = rendered.title;
             gmailDebug.renderBodyPreview = rendered.bodyPreview;
             gmailDebug.renderPdfBytes = rendered.pdfBytes;
+            gmailDebug.renderCaptureMethod = rendered.captureMethod;
           } else {
             const bodyLines = [
               `Subject: ${email.subject}`,
@@ -244,7 +247,8 @@ gmailRouter.post('/sync', async (req, res) => {
             path: 'email_body',
             pdfBytes: pdfBuffer.length,
             renderTitle: gmailDebug.renderTitle,
-            renderBodyPreview: gmailDebug.renderBodyPreview
+            renderBodyPreview: gmailDebug.renderBodyPreview,
+            renderCaptureMethod: gmailDebug.renderCaptureMethod
           }, 'gmail sync email body processed');
           results.push({ ...processed, source: 'gmail', gmailResolution: 'email_body', gmailDebug });
         } catch (err: any) {
