@@ -20,6 +20,10 @@ function getMimeTypeFromUrl(url: string) {
   return null;
 }
 
+function hasDirectFileExtension(url: string) {
+  return Boolean(getMimeTypeFromUrl(url));
+}
+
 function getFileNameFromUrl(url: string, fallback: string) {
   const pathname = new URL(url).pathname;
   const lastSegment = decodeURIComponent(pathname.split('/').filter(Boolean).pop() || '');
@@ -27,8 +31,23 @@ function getFileNameFromUrl(url: string, fallback: string) {
 }
 
 function shouldUseBrowserFirst(url: string) {
-  const hostname = new URL(url).hostname.toLowerCase();
-  return hostname === 'service.kvish6.co.il' || hostname.endsWith('.service.kvish6.co.il');
+  const parsed = new URL(url);
+  const hostname = parsed.hostname.toLowerCase();
+  const pathname = parsed.pathname.toLowerCase();
+
+  if (hasDirectFileExtension(url)) return false;
+
+  return (
+    parsed.protocol === 'http:' ||
+    parsed.hash.includes('/invoice') ||
+    pathname.includes('/invoice') ||
+    pathname.includes('/formmonitor') ||
+    pathname.includes('/addlinktrack') ||
+    pathname === '/l/' ||
+    hostname.includes('track') ||
+    hostname.includes('click') ||
+    hostname.includes('link')
+  );
 }
 
 function looksLikeBlockedInvoicePage(rendered: {
