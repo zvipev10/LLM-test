@@ -1,6 +1,14 @@
 import { chromium } from 'playwright';
 
-export async function renderPageToPdf(url: string): Promise<Buffer> {
+export type RenderedPagePdf = {
+  buffer: Buffer;
+  finalUrl: string;
+  title: string;
+  bodyPreview: string;
+  pdfBytes: number;
+};
+
+export async function renderPageToPdf(url: string): Promise<RenderedPagePdf> {
   const browser = await chromium.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -22,6 +30,11 @@ export async function renderPageToPdf(url: string): Promise<Buffer> {
 
     await page.waitForTimeout(3_000);
 
+    const title = await page.title().catch(() => '');
+    const bodyPreview = await page.locator('body').innerText({ timeout: 5_000 })
+      .then((text) => text.replace(/\s+/g, ' ').trim().slice(0, 1000))
+      .catch(() => '');
+
     const pdf = await page.pdf({
       format: 'A4',
       printBackground: true,
@@ -33,7 +46,15 @@ export async function renderPageToPdf(url: string): Promise<Buffer> {
       }
     });
 
-    return Buffer.from(pdf);
+    const buffer = Buffer.from(pdf);
+
+    return {
+      buffer,
+      finalUrl: page.url(),
+      title,
+      bodyPreview,
+      pdfBytes: buffer.length
+    };
   } finally {
     await browser.close();
   }

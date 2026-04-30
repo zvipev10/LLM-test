@@ -3,6 +3,7 @@ import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, creat
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { resolveGmailInvoiceSource } from '../services/openai';
 import { renderPageToPdf } from '../services/browserRenderer';
+import { logger } from '../logger';
 
 export const gmailRouter = Router();
 
@@ -25,7 +26,23 @@ function getFileNameFromUrl(url: string, fallback: string) {
   return sanitizeFileName(lastSegment || fallback);
 }
 
-async function fetchInvoiceLinkAsFile(url: string, fallbackName: string) {
+type GmailDebug = {
+  path?: string;
+  selectedLink?: string | null;
+  resolutionKind?: string;
+  resolutionReason?: string | null;
+  fetchStatus?: number;
+  fetchContentType?: string;
+  fetchBytes?: number;
+  sourceKind?: string;
+  renderFinalUrl?: string;
+  renderTitle?: string;
+  renderBodyPreview?: string;
+  renderPdfBytes?: number;
+  error?: string;
+};
+
+async function fetchInvoiceLinkAsFile(url: string, fallbackName: string, debug: GmailDebug) {
   const response = await fetch(url);
   const mimeTypeFromUrl = getMimeTypeFromUrl(url);
   const responseContentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
@@ -33,14 +50,21 @@ async function fetchInvoiceLinkAsFile(url: string, fallbackName: string) {
     ? mimeTypeFromUrl || responseContentType
     : responseContentType || mimeTypeFromUrl || 'text/html';
 
+  debug.selectedLink = url;
+  debug.fetchStatus = response.status;
+  debug.fetchContentType = contentType;
+
   if (!response.ok) {
     throw new Error(`Invoice link returned ${response.status}`);
   }
 
   const arrayBuffer = await response.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
+  debug.fetchBytes = buffer.length;
 
   if (contentType === 'application/pdf' || contentType.startsWith('image/')) {
+    debug.path = 'linked_file';
+    debug.sourceKind = 'linked_file';
     return {
       buffer,
       mimeType: contentType,
@@ -49,8 +73,16 @@ async function fetchInvoiceLinkAsFile(url: string, fallbackName: string) {
     };
   }
 
+  const rendered = await renderPageToPdf(url);
+  debug.path = 'linked_page';
+  debug.sourceKind = 'linked_page';
+  debug.renderFinalUrl = rendered.finalUrl;
+  debug.renderTitle = rendered.title;
+  debug.renderBodyPreview = rendered.bodyPreview;
+  debug.renderPdfBytes = rendered.pdfBytes;
+
   return {
-    buffer: await renderPageToPdf(url),
+    buffer: rendered.buffer,
     mimeType: 'application/pdf',
     fileName: fallbackName.toLowerCase().endsWith('.pdf') ? fallbackName : `${fallbackName}.pdf`,
     sourceKind: 'linked_page' as const
@@ -86,17 +118,54 @@ gmailRouter.post('/sync', async (req, res) => {
     const results: any[] = [];
 
     for (const email of emails) {
+      const baseDebug = {
+        gmailMessageId: email.gmailMessageId,
+        subject: email.subject,
+        fromAddress: email.fromAddress,
+        attachmentCount: email.attachments.length,
+        attachments: email.attachments.map((attachment: any) => ({
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+          hasAttachmentId: Boolean(attachment.attachmentId)
+        })),
+        linkCount: email.links.length,
+        links: email.links
+      };
+
+      logger.info(baseDebug, 'gmail sync email inspected');
+
       if (email.attachments.length > 0) {
         for (const att of email.attachments) {
+          const gmailDebug: GmailDebug = {
+            path: 'attachment'
+          };
+
           try {
             const buffer = await downloadAttachment(email.gmailMessageId, att.attachmentId);
             const processed = await processInvoiceFile(buffer, att.mimeType, att.fileName);
-            results.push({ ...processed, source: 'gmail' });
+            logger.info({
+              ...baseDebug,
+              path: 'attachment',
+              fileName: att.fileName,
+              mimeType: att.mimeType,
+              bytes: buffer.length
+            }, 'gmail sync attachment processed');
+            results.push({ ...processed, source: 'gmail', gmailDebug });
           } catch (err: any) {
-            results.push({ success: false, filename: att.fileName, error: err.message });
+            gmailDebug.path = 'failed';
+            gmailDebug.error = err.message;
+            logger.error({
+              ...baseDebug,
+              path: 'attachment',
+              fileName: att.fileName,
+              error: err.message
+            }, 'gmail sync attachment failed');
+            results.push({ success: false, filename: att.fileName, error: err.message, gmailDebug });
           }
         }
       } else {
+        const gmailDebug: GmailDebug = {};
+
         try {
           const resolution = await resolveGmailInvoiceSource({
             subject: email.subject,
@@ -105,13 +174,23 @@ gmailRouter.post('/sync', async (req, res) => {
             htmlText: email.htmlText,
             links: email.links
           });
+          gmailDebug.resolutionKind = resolution.kind;
+          gmailDebug.selectedLink = resolution.selectedLink;
+          gmailDebug.resolutionReason = resolution.reason;
+
+          logger.info({
+            ...baseDebug,
+            resolution
+          }, 'gmail sync invoice source resolved');
 
           if (resolution.kind === 'not_invoice') {
+            gmailDebug.path = 'not_invoice';
             results.push({
               success: false,
               skipped: true,
               filename: `${sanitizeFileName(email.subject || 'mail')}.pdf`,
-              error: resolution.reason || 'Email does not look like an invoice'
+              error: resolution.reason || 'Email does not look like an invoice',
+              gmailDebug
             });
             continue;
           }
@@ -119,14 +198,22 @@ gmailRouter.post('/sync', async (req, res) => {
           if (resolution.kind === 'invoice_link' && resolution.selectedLink) {
             const linkedFile = await fetchInvoiceLinkAsFile(
               resolution.selectedLink,
-              sanitizeFileName(email.subject || 'invoice-from-link')
+              sanitizeFileName(email.subject || 'invoice-from-link'),
+              gmailDebug
             );
             const processed = await processInvoiceFile(linkedFile.buffer, linkedFile.mimeType, linkedFile.fileName);
+            logger.info({
+              ...baseDebug,
+              ...gmailDebug,
+              fileName: linkedFile.fileName,
+              mimeType: linkedFile.mimeType
+            }, 'gmail sync linked invoice processed');
             results.push({
               ...processed,
               source: 'gmail',
               gmailResolution: linkedFile.sourceKind,
-              gmailSourceUrl: resolution.selectedLink
+              gmailSourceUrl: resolution.selectedLink,
+              gmailDebug
             });
             continue;
           }
@@ -141,9 +228,22 @@ gmailRouter.post('/sync', async (req, res) => {
 
           const pdfBuffer = createSimplePdfBuffer(bodyLines);
           const processed = await processInvoiceFile(pdfBuffer, 'application/pdf', `${sanitizeFileName(email.subject || 'mail')}.pdf`);
-          results.push({ ...processed, source: 'gmail', gmailResolution: 'email_body' });
+          gmailDebug.path = 'email_body';
+          logger.info({
+            ...baseDebug,
+            path: 'email_body',
+            pdfBytes: pdfBuffer.length
+          }, 'gmail sync email body processed');
+          results.push({ ...processed, source: 'gmail', gmailResolution: 'email_body', gmailDebug });
         } catch (err: any) {
-          results.push({ success: false, filename: `${email.subject || 'mail'}.pdf`, error: err.message });
+          gmailDebug.path = 'failed';
+          gmailDebug.error = err.message;
+          logger.error({
+            ...baseDebug,
+            ...gmailDebug,
+            error: err.message
+          }, 'gmail sync email failed');
+          results.push({ success: false, filename: `${email.subject || 'mail'}.pdf`, error: err.message, gmailDebug });
         }
       }
     }
