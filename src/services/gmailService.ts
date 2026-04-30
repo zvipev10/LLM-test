@@ -34,48 +34,20 @@ function extractHeader(headers: any[] | undefined, name: string) {
   return headers?.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || ''
 }
 
-function getFileNameForPart(part: any, index: number) {
-  if (part.filename) return part.filename
-  if (part.mimeType === 'application/pdf') return `gmail-attachment-${index}.pdf`
-  if (part.mimeType === 'image/png') return `gmail-attachment-${index}.png`
-  if (part.mimeType === 'image/jpeg') return `gmail-attachment-${index}.jpg`
-  return `gmail-attachment-${index}`
-}
-
-function isProcessableAttachmentPart(part: any) {
-  if (!part?.body) return false
-  if (part.filename && (part.body.attachmentId || part.body.data)) return true
-  return (
-    (part.body.attachmentId || part.body.data) &&
-    (
-      part.mimeType === 'application/pdf' ||
-      part.mimeType?.startsWith('image/')
-    )
-  )
-}
-
-function collectAttachments(payload: any): any[] {
-  if (!payload) return []
+function collectAttachments(parts: any[] | undefined): any[] {
+  if (!parts) return []
   const result: any[] = []
 
-  const walk = (part: any) => {
-    if (!part) return
-
-    if (isProcessableAttachmentPart(part)) {
-      result.push({
-        fileName: getFileNameForPart(part, result.length + 1),
-        mimeType: part.mimeType,
-        attachmentId: part.body.attachmentId,
-        data: part.body.data
-      })
-    }
-
-    if (part.parts) {
-      part.parts.forEach(walk)
-    }
+  const walk = (items: any[]) => {
+    items.forEach((part) => {
+      if (part.filename && part.body?.attachmentId) {
+        result.push({ fileName: part.filename, mimeType: part.mimeType, attachmentId: part.body.attachmentId })
+      }
+      if (part.parts) walk(part.parts)
+    })
   }
 
-  walk(payload)
+  walk(parts)
   return result
 }
 
@@ -187,7 +159,7 @@ export async function fetchEmails() {
 
     const payload = full.data.payload
     const headers = payload?.headers || []
-    const attachments = collectAttachments(payload)
+    const attachments = collectAttachments(payload?.parts)
     const { textBody, htmlBody } = collectBodyParts(payload)
     const htmlText = stripHtml(htmlBody)
     const links = extractLinks(textBody, htmlBody)
@@ -211,15 +183,7 @@ export async function fetchEmails() {
   return fullMessages.filter((message) => message.labelIds.includes(exactLabelId))
 }
 
-export async function downloadAttachment(messageId: string, attachmentId?: string, inlineData?: string): Promise<Buffer> {
-  if (inlineData) {
-    return Buffer.from(inlineData.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
-  }
-
-  if (!attachmentId) {
-    throw new Error('Missing Gmail attachment ID')
-  }
-
+export async function downloadAttachment(messageId: string, attachmentId: string): Promise<Buffer> {
   const gmail = getGmailClient()
   const attachment = await gmail.users.messages.attachments.get({ userId: 'me', messageId, id: attachmentId })
   const data = attachment.data.data || ''
