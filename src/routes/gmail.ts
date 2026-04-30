@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, createSimplePdfBuffer } from '../services/gmailService';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { resolveGmailInvoiceSource } from '../services/openai';
-import { renderHtmlToPdf, renderPageToPdf } from '../services/browserRenderer';
+import { renderHtmlToPdf } from '../services/browserRenderer';
 import { logger } from '../logger';
 
 export const gmailRouter = Router();
@@ -11,74 +11,11 @@ function sanitizeFileName(value: string) {
   return value.replace(/[\\/:*?"<>|]+/g, '-').trim().slice(0, 120) || 'mail';
 }
 
-function getMimeTypeFromUrl(url: string) {
-  const pathname = new URL(url).pathname.toLowerCase();
-  if (pathname.endsWith('.pdf')) return 'application/pdf';
-  if (pathname.endsWith('.png')) return 'image/png';
-  if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) return 'image/jpeg';
-  if (pathname.endsWith('.webp')) return 'image/webp';
-  return null;
-}
-
-function hasDirectFileExtension(url: string) {
-  return Boolean(getMimeTypeFromUrl(url));
-}
-
-function getFileNameFromUrl(url: string, fallback: string) {
-  const pathname = new URL(url).pathname;
-  const lastSegment = decodeURIComponent(pathname.split('/').filter(Boolean).pop() || '');
-  return sanitizeFileName(lastSegment || fallback);
-}
-
-function shouldUseBrowserFirst(url: string) {
-  const parsed = new URL(url);
-  const hostname = parsed.hostname.toLowerCase();
-  const pathname = parsed.pathname.toLowerCase();
-
-  if (hasDirectFileExtension(url)) return false;
-
-  return (
-    parsed.protocol === 'http:' ||
-    parsed.hash.includes('/invoice') ||
-    pathname.includes('/invoice') ||
-    pathname.includes('/formmonitor') ||
-    pathname.includes('/addlinktrack') ||
-    pathname === '/l/' ||
-    hostname.includes('track') ||
-    hostname.includes('click') ||
-    hostname.includes('link')
-  );
-}
-
-function looksLikeBlockedInvoicePage(rendered: {
-  finalUrl: string;
-  bodyPreview: string;
-  pdfBytes: number;
-  captureMethod: string;
-}) {
-  const finalUrl = rendered.finalUrl.toLowerCase();
-  const body = rendered.bodyPreview;
-
-  return (
-    rendered.captureMethod === 'page_print' &&
-    (
-      finalUrl.includes('errorpage') ||
-      body.includes('פעולה לא תקינה') ||
-      body.includes('מספר מזהה תקלה') ||
-      body.toLowerCase().includes('soap error')
-    )
-  );
-}
-
 type GmailDebug = {
   path?: string;
   selectedLink?: string | null;
   resolutionKind?: string;
   resolutionReason?: string | null;
-  fetchStatus?: number;
-  fetchContentType?: string;
-  fetchBytes?: number;
-  sourceKind?: string;
   renderFinalUrl?: string;
   renderTitle?: string;
   renderBodyPreview?: string;
@@ -86,77 +23,6 @@ type GmailDebug = {
   renderCaptureMethod?: string;
   error?: string;
 };
-
-async function fetchInvoiceLinkAsFile(url: string, fallbackName: string, debug: GmailDebug) {
-  debug.selectedLink = url;
-
-  if (shouldUseBrowserFirst(url)) {
-    const rendered = await renderPageToPdf(url);
-    debug.path = 'linked_page';
-    debug.sourceKind = 'linked_page';
-    debug.renderFinalUrl = rendered.finalUrl;
-    debug.renderTitle = rendered.title;
-    debug.renderBodyPreview = rendered.bodyPreview;
-    debug.renderPdfBytes = rendered.pdfBytes;
-    debug.renderCaptureMethod = rendered.captureMethod;
-
-    if (looksLikeBlockedInvoicePage(rendered)) {
-      throw new Error(`Invoice provider blocked browser rendering. Final URL: ${rendered.finalUrl}. Preview: ${rendered.bodyPreview}`);
-    }
-
-    return {
-      buffer: rendered.buffer,
-      mimeType: 'application/pdf',
-      fileName: fallbackName.toLowerCase().endsWith('.pdf') ? fallbackName : `${fallbackName}.pdf`,
-      sourceKind: 'linked_page' as const
-    };
-  }
-
-  const response = await fetch(url);
-  const mimeTypeFromUrl = getMimeTypeFromUrl(url);
-  const responseContentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
-  const contentType = responseContentType === 'application/octet-stream'
-    ? mimeTypeFromUrl || responseContentType
-    : responseContentType || mimeTypeFromUrl || 'text/html';
-
-  debug.fetchStatus = response.status;
-  debug.fetchContentType = contentType;
-
-  if (!response.ok) {
-    throw new Error(`Invoice link returned ${response.status}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  debug.fetchBytes = buffer.length;
-
-  if (contentType === 'application/pdf' || contentType.startsWith('image/')) {
-    debug.path = 'linked_file';
-    debug.sourceKind = 'linked_file';
-    return {
-      buffer,
-      mimeType: contentType,
-      fileName: getFileNameFromUrl(url, fallbackName),
-      sourceKind: 'linked_file' as const
-    };
-  }
-
-  const rendered = await renderPageToPdf(url);
-  debug.path = 'linked_page';
-  debug.sourceKind = 'linked_page';
-  debug.renderFinalUrl = rendered.finalUrl;
-  debug.renderTitle = rendered.title;
-  debug.renderBodyPreview = rendered.bodyPreview;
-  debug.renderPdfBytes = rendered.pdfBytes;
-  debug.renderCaptureMethod = rendered.captureMethod;
-
-  return {
-    buffer: rendered.buffer,
-    mimeType: 'application/pdf',
-    fileName: fallbackName.toLowerCase().endsWith('.pdf') ? fallbackName : `${fallbackName}.pdf`,
-    sourceKind: 'linked_page' as const
-  };
-}
 
 gmailRouter.get('/connect', (req, res) => {
   res.redirect(getAuthUrl());
@@ -265,22 +131,18 @@ gmailRouter.post('/sync', async (req, res) => {
           }
 
           if (resolution.kind === 'invoice_link' && resolution.selectedLink) {
-            const linkedFile = await fetchInvoiceLinkAsFile(
-              resolution.selectedLink,
-              sanitizeFileName(email.subject || 'invoice-from-link'),
-              gmailDebug
-            );
-            const processed = await processInvoiceFile(linkedFile.buffer, linkedFile.mimeType, linkedFile.fileName);
+            gmailDebug.path = 'client_capture_required';
             logger.info({
               ...baseDebug,
-              ...gmailDebug,
-              fileName: linkedFile.fileName,
-              mimeType: linkedFile.mimeType
-            }, 'gmail sync linked invoice processed');
+              ...gmailDebug
+            }, 'gmail sync linked invoice requires client capture');
             results.push({
-              ...processed,
+              success: false,
+              needsClientCapture: true,
+              filename: `${sanitizeFileName(email.subject || 'invoice-from-link')}.pdf`,
+              error: 'Client browser capture required',
               source: 'gmail',
-              gmailResolution: linkedFile.sourceKind,
+              gmailResolution: 'client_capture_required',
               gmailSourceUrl: resolution.selectedLink,
               gmailDebug
             });
