@@ -89,7 +89,7 @@ gmailRouter.post('/sync', async (req, res) => {
       if (email.attachments.length > 0) {
         for (const att of email.attachments) {
           try {
-            const buffer = await downloadAttachment(email.gmailMessageId, att.attachmentId);
+            const buffer = await downloadAttachment(email.gmailMessageId, att.attachmentId, att.data);
             const processed = await processInvoiceFile(buffer, att.mimeType, att.fileName);
             results.push({ ...processed, source: 'gmail' });
           } catch (err: any) {
