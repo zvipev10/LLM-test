@@ -13,7 +13,7 @@ export type RenderedPagePdf = {
 export async function renderPageToPdf(url: string): Promise<RenderedPagePdf> {
   const browser = await chromium.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
   });
 
   try {
@@ -21,6 +21,7 @@ export async function renderPageToPdf(url: string): Promise<RenderedPagePdf> {
       acceptDownloads: true,
       viewport: { width: 1280, height: 1800 },
       locale: 'he-IL',
+      timezoneId: 'Asia/Jerusalem',
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       extraHTTPHeaders: {
         'Accept-Language': 'he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -28,6 +29,7 @@ export async function renderPageToPdf(url: string): Promise<RenderedPagePdf> {
       }
     });
     const page = await context.newPage();
+    await page.addInitScript("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });");
 
     const pdfResponseBodies: Array<Promise<Buffer | null>> = [];
     page.on('response', (response) => {

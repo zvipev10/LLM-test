@@ -26,6 +26,31 @@ function getFileNameFromUrl(url: string, fallback: string) {
   return sanitizeFileName(lastSegment || fallback);
 }
 
+function shouldUseBrowserFirst(url: string) {
+  const hostname = new URL(url).hostname.toLowerCase();
+  return hostname === 'service.kvish6.co.il' || hostname.endsWith('.service.kvish6.co.il');
+}
+
+function looksLikeBlockedInvoicePage(rendered: {
+  finalUrl: string;
+  bodyPreview: string;
+  pdfBytes: number;
+  captureMethod: string;
+}) {
+  const finalUrl = rendered.finalUrl.toLowerCase();
+  const body = rendered.bodyPreview;
+
+  return (
+    rendered.captureMethod === 'page_print' &&
+    (
+      finalUrl.includes('errorpage') ||
+      body.includes('פעולה לא תקינה') ||
+      body.includes('מספר מזהה תקלה') ||
+      body.toLowerCase().includes('soap error')
+    )
+  );
+}
+
 type GmailDebug = {
   path?: string;
   selectedLink?: string | null;
@@ -44,6 +69,30 @@ type GmailDebug = {
 };
 
 async function fetchInvoiceLinkAsFile(url: string, fallbackName: string, debug: GmailDebug) {
+  debug.selectedLink = url;
+
+  if (shouldUseBrowserFirst(url)) {
+    const rendered = await renderPageToPdf(url);
+    debug.path = 'linked_page';
+    debug.sourceKind = 'linked_page';
+    debug.renderFinalUrl = rendered.finalUrl;
+    debug.renderTitle = rendered.title;
+    debug.renderBodyPreview = rendered.bodyPreview;
+    debug.renderPdfBytes = rendered.pdfBytes;
+    debug.renderCaptureMethod = rendered.captureMethod;
+
+    if (looksLikeBlockedInvoicePage(rendered)) {
+      throw new Error(`Invoice provider blocked browser rendering. Final URL: ${rendered.finalUrl}. Preview: ${rendered.bodyPreview}`);
+    }
+
+    return {
+      buffer: rendered.buffer,
+      mimeType: 'application/pdf',
+      fileName: fallbackName.toLowerCase().endsWith('.pdf') ? fallbackName : `${fallbackName}.pdf`,
+      sourceKind: 'linked_page' as const
+    };
+  }
+
   const response = await fetch(url);
   const mimeTypeFromUrl = getMimeTypeFromUrl(url);
   const responseContentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
@@ -51,7 +100,6 @@ async function fetchInvoiceLinkAsFile(url: string, fallbackName: string, debug: 
     ? mimeTypeFromUrl || responseContentType
     : responseContentType || mimeTypeFromUrl || 'text/html';
 
-  debug.selectedLink = url;
   debug.fetchStatus = response.status;
   debug.fetchContentType = contentType;
 
