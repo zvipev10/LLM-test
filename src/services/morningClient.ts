@@ -288,7 +288,6 @@ function normalizeExpenseAccountingClassification(
   const irsCode = typeof classification.irsCode === 'number'
     ? classification.irsCode
     : Number(code);
-  const parentCode = classification.parentIrsCode ?? classification.code ?? classification.key ?? irsCode;
 
   if (!classification.id) {
     throw new Error('Selected Morning category is missing an ID');
@@ -300,7 +299,7 @@ function normalizeExpenseAccountingClassification(
   return {
     id: classification.id,
     key: classification.key || String(code),
-    code: String(parentCode),
+    code: String(code),
     title: classification.title || classification.name || String(code),
     irsCode,
     type: classification.type ?? 20,
