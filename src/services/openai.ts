@@ -144,7 +144,7 @@ export async function resolveGmailInvoiceSource(params: {
   links: Array<{ url: string; text: string; source: string }>;
 }): Promise<GmailInvoiceResolution> {
   const response = await client.responses.create({
-    model: 'gpt-5.4',
+    model: 'gpt-5.3',
     input: [
       {
         role: 'user',
@@ -197,7 +197,7 @@ export async function extractInvoiceData(
   const dataUrl = `data:${mimeType};base64,${base64File}`;
 
   const response = await client.responses.create({
-    model: 'gpt-5.4',
+    model: 'gpt-5.3',
     input: [
       {
         role: 'user',
@@ -253,7 +253,7 @@ export async function selectMorningCategoryForInvoice(
   categories: MorningAccountingClassificationOption[]
 ): Promise<MorningAccountingClassificationOption | null> {
   const response = await client.responses.create({
-    model: 'gpt-5.4',
+    model: 'gpt-5.3',
     input: [
       {
         role: 'user',
