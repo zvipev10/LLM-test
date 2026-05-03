@@ -2,9 +2,11 @@ import { Router, Request, Response } from 'express';
 import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus } from '../database/invoiceService';
+import { getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
 import { logger } from '../logger';
 import { getMorningAccountingClassificationOptions, sendInvoiceToMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
+import { selectMorningCategoryForInvoice } from '../services/openai';
+import type { MorningAccountingClassificationOption } from '../services/morningClient';
 
 export const invoiceRouter = Router();
 
@@ -17,6 +19,38 @@ type MorningSyncResult = {
   morningFileSyncError?: string | null;
   error?: string;
 };
+
+type CategoryRefreshResult = {
+  invoiceId: number;
+  success: boolean;
+  skipped?: boolean;
+  oldCategoryId?: string | null;
+  oldCategoryName?: string | null;
+  oldCategoryCode?: number | null;
+  morningCategoryId?: string | null;
+  morningCategoryName?: string | null;
+  morningCategoryCode?: number | null;
+  changed?: boolean;
+  error?: string;
+};
+
+function toStoredMorningCategory(category: MorningAccountingClassificationOption | null) {
+  if (!category) {
+    return {
+      morningCategoryId: null,
+      morningCategoryName: null,
+      morningCategoryCode: null
+    };
+  }
+
+  const numericCode = typeof category.code === 'number' ? category.code : Number(category.code);
+
+  return {
+    morningCategoryId: category.id,
+    morningCategoryName: category.name,
+    morningCategoryCode: Number.isFinite(numericCode) ? numericCode : null
+  };
+}
 
 invoiceRouter.post(
   '/upload',
@@ -189,6 +223,118 @@ invoiceRouter.get('/morning/accounting-classifications', async (_req: Request, r
       durationMs: Date.now() - startedAt
     }, 'morning accounting classifications list failed');
 
+    return res.status(500).json({
+      success: false,
+      error: errorMessage
+    });
+  }
+});
+
+invoiceRouter.post('/morning/reclassify-categories', async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  try {
+    const { invoiceIds, onlyMissing = false, dryRun = false } = req.body || {};
+
+    if (invoiceIds !== undefined && !Array.isArray(invoiceIds)) {
+      return res.status(400).json({
+        success: false,
+        error: 'invoiceIds must be an array when provided'
+      });
+    }
+
+    const requestedIds = Array.isArray(invoiceIds)
+      ? new Set(
+        invoiceIds
+          .map((id: unknown) => Number(id))
+          .filter((id: number) => Number.isInteger(id) && id > 0)
+      )
+      : null;
+
+    if (Array.isArray(invoiceIds) && requestedIds?.size === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid invoice IDs were provided'
+      });
+    }
+
+    const categories = await getMorningAccountingClassificationOptions(true);
+    const invoices = getInvoices()
+      .filter((invoice) => !requestedIds || requestedIds.has(Number(invoice.id)))
+      .filter((invoice) => !onlyMissing || !invoice.morningCategoryId);
+
+    const results: CategoryRefreshResult[] = [];
+
+    for (const invoice of invoices) {
+      if (!invoice.id) continue;
+
+      try {
+        const oldCategory = {
+          oldCategoryId: invoice.morningCategoryId ?? null,
+          oldCategoryName: invoice.morningCategoryName ?? null,
+          oldCategoryCode: invoice.morningCategoryCode ?? null
+        };
+        const selected = await selectMorningCategoryForInvoice(invoice, categories);
+        const nextCategory = toStoredMorningCategory(selected);
+        const changed =
+          (invoice.morningCategoryId ?? null) !== nextCategory.morningCategoryId ||
+          (invoice.morningCategoryName ?? null) !== nextCategory.morningCategoryName ||
+          (invoice.morningCategoryCode ?? null) !== nextCategory.morningCategoryCode;
+
+        if (!dryRun && changed) {
+          updateInvoiceMorningCategory(invoice.id, nextCategory);
+        }
+
+        results.push({
+          invoiceId: invoice.id,
+          success: true,
+          ...oldCategory,
+          ...nextCategory,
+          changed
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({
+          invoiceId: invoice.id,
+          error: errorMessage
+        }, 'invoice morning category reclassification failed');
+        results.push({
+          invoiceId: invoice.id,
+          success: false,
+          error: errorMessage
+        });
+      }
+    }
+
+    const successCount = results.filter((result) => result.success).length;
+    const changedCount = results.filter((result) => result.success && result.changed).length;
+
+    logger.info({
+      requestedCount: requestedIds?.size ?? null,
+      processedCount: results.length,
+      successCount,
+      changedCount,
+      failedCount: results.length - successCount,
+      onlyMissing: Boolean(onlyMissing),
+      dryRun: Boolean(dryRun),
+      categoryCount: categories.length,
+      durationMs: Date.now() - startedAt
+    }, 'invoice morning categories reclassified');
+
+    return res.status(200).json({
+      success: true,
+      processedCount: results.length,
+      successCount,
+      changedCount,
+      failedCount: results.length - successCount,
+      dryRun: Boolean(dryRun),
+      results
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({
+      error: errorMessage,
+      durationMs: Date.now() - startedAt
+    }, 'invoice morning categories reclassification batch failed');
     return res.status(500).json({
       success: false,
       error: errorMessage

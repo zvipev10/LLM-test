@@ -237,8 +237,8 @@ function collectAccountingClassifications(value: unknown, results: MorningAccoun
   return results;
 }
 
-async function getAccountingClassifications() {
-  if (cachedAccountingClassifications) {
+async function getAccountingClassifications(forceRefresh = false) {
+  if (cachedAccountingClassifications && !forceRefresh) {
     return cachedAccountingClassifications;
   }
 
@@ -256,6 +256,10 @@ async function getAccountingClassifications() {
 
 export async function initializeMorningAccountingClassifications() {
   await getAccountingClassifications();
+}
+
+export async function refreshMorningAccountingClassifications() {
+  return getAccountingClassifications(true);
 }
 
 function isSelectableAccountingClassification(classification: MorningAccountingClassification) {
@@ -304,8 +308,8 @@ function normalizeExpenseAccountingClassification(
   };
 }
 
-export async function getMorningAccountingClassificationOptions() {
-  const classifications = await getAccountingClassifications();
+export async function getMorningAccountingClassificationOptions(forceRefresh = false) {
+  const classifications = await getAccountingClassifications(forceRefresh);
 
   return classifications
     .filter(isSelectableAccountingClassification)

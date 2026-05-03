@@ -45,6 +45,45 @@ RESPOND WITH ONLY A VALID JSON OBJECT, NO OTHER TEXT, NO EXPLANATIONS:
 }`;
 }
 
+function buildCategorySelectionPrompt(params: {
+  invoice: {
+    fileName?: string | null;
+    vendorName?: string | null;
+    date?: string | null;
+    totalWithVat?: number | null;
+    totalWithoutVat?: number | null;
+    currency?: string | null;
+    currentMorningCategoryId?: string | null;
+    currentMorningCategoryName?: string | null;
+    currentMorningCategoryCode?: number | null;
+  };
+  categories: MorningAccountingClassificationOption[];
+}) {
+  const categoryList = params.categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    code: category.code
+  }));
+
+  return `You choose the best Morning accounting category for an existing invoice.
+
+Use the invoice fields and the current Morning category list. Choose one category only from the list.
+If the current category is still the best fit, choose it again.
+If no category reasonably fits, return null.
+
+INVOICE:
+${JSON.stringify(params.invoice, null, 2)}
+
+MORNING CATEGORY LIST:
+${JSON.stringify(categoryList, null, 2)}
+
+RESPOND WITH ONLY A VALID JSON OBJECT:
+
+{
+  "morningCategoryId": "category id from list or null"
+}`;
+}
+
 export type GmailInvoiceResolution = {
   kind: 'invoice_body' | 'invoice_link' | 'not_invoice';
   selectedLink: string | null;
@@ -197,4 +236,63 @@ export async function extractInvoiceData(
     }
     throw new Error(`Invalid JSON response: ${parseError instanceof Error ? parseError.message : String(parseError)}. Response: ${cleaned.substring(0, 200)}`);
   }
+}
+
+export async function selectMorningCategoryForInvoice(
+  invoice: {
+    fileName?: string | null;
+    vendorName?: string | null;
+    date?: string | null;
+    totalWithVat?: number | null;
+    totalWithoutVat?: number | null;
+    currency?: string | null;
+    morningCategoryId?: string | null;
+    morningCategoryName?: string | null;
+    morningCategoryCode?: number | null;
+  },
+  categories: MorningAccountingClassificationOption[]
+): Promise<MorningAccountingClassificationOption | null> {
+  const response = await client.responses.create({
+    model: 'gpt-5.4',
+    input: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: buildCategorySelectionPrompt({
+              invoice: {
+                fileName: invoice.fileName ?? null,
+                vendorName: invoice.vendorName ?? null,
+                date: invoice.date ?? null,
+                totalWithVat: invoice.totalWithVat ?? null,
+                totalWithoutVat: invoice.totalWithoutVat ?? null,
+                currency: invoice.currency ?? null,
+                currentMorningCategoryId: invoice.morningCategoryId ?? null,
+                currentMorningCategoryName: invoice.morningCategoryName ?? null,
+                currentMorningCategoryCode: invoice.morningCategoryCode ?? null
+              },
+              categories
+            }),
+          }
+        ]
+      }
+    ],
+    max_output_tokens: 150,
+    temperature: 0,
+  });
+
+  const content = response.output_text;
+  if (!content) throw new Error('No response from OpenAI');
+
+  const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  const parsed = JSON.parse(cleaned) as { morningCategoryId?: string | null };
+  if (!parsed.morningCategoryId) return null;
+
+  const selected = categories.find((category) => category.id === parsed.morningCategoryId);
+  if (!selected) {
+    throw new Error('OpenAI selected a Morning category that was not provided');
+  }
+
+  return selected;
 }

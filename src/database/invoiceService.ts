@@ -257,6 +257,52 @@ export function updateInvoice(invoice: InvoiceWithFile): boolean {
   return updated;
 }
 
+export function updateInvoiceMorningCategory(
+  id: number,
+  category: {
+    morningCategoryId: string | null;
+    morningCategoryName: string | null;
+    morningCategoryCode: number | null;
+  }
+): boolean {
+  const startedAt = Date.now();
+  const db = getDb();
+  const columns = getInvoiceColumns();
+  const assignments: string[] = [];
+  const values: any[] = [];
+
+  if (columns.has('morningCategoryId')) {
+    assignments.push('morningCategoryId = ?');
+    values.push(category.morningCategoryId);
+  }
+  if (columns.has('morningCategoryName')) {
+    assignments.push('morningCategoryName = ?');
+    values.push(category.morningCategoryName);
+  }
+  if (columns.has('morningCategoryCode')) {
+    assignments.push('morningCategoryCode = ?');
+    values.push(category.morningCategoryCode);
+  }
+  if (columns.has('updatedAt')) {
+    assignments.push('updatedAt = CURRENT_TIMESTAMP');
+  }
+
+  if (assignments.length === 0) return false;
+
+  values.push(id);
+  const stmt = db.prepare(`UPDATE invoices SET ${assignments.join(', ')} WHERE id = ?`);
+  const result = stmt.run(...values);
+  const updated = result.changes > 0;
+  logger.info({
+    invoiceId: id,
+    updated,
+    morningCategoryId: category.morningCategoryId,
+    morningCategoryCode: category.morningCategoryCode,
+    durationMs: Date.now() - startedAt
+  }, 'invoice morning category updated');
+  return updated;
+}
+
 export function deleteInvoice(id: number): boolean {
   const startedAt = Date.now();
   const db = getDb();
