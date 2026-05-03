@@ -157,7 +157,6 @@ export async function resolveGmailInvoiceSource(params: {
       }
     ],
     max_output_tokens: 300,
-    temperature: 0,
   });
 
   const content = response.output_text;
@@ -215,7 +214,6 @@ export async function extractInvoiceData(
       }
     ],
     max_output_tokens: 700,
-    temperature: 0,
   });
 
   const content = response.output_text;
@@ -279,7 +277,6 @@ export async function selectMorningCategoryForInvoice(
       }
     ],
     max_output_tokens: 150,
-    temperature: 0,
   });
 
   const content = response.output_text;
