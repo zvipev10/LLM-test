@@ -22,7 +22,7 @@ STAGE 2 - classify each useful value from stage 1 into the following fields:
 - vendor name: best guess for the vendor name. If not explicitly stated, try to extract it from the document, such as from the header or logo. If it logically cannot be extracted, return null.
 - total with vat.
 - total without vat: if not explicitly stated, calculate from total_with_vat using 18% VAT. If it logically cannot be extracted or calculated, return the same value as total_with_vat, assuming the invoice might be VAT-free.
-- date: best fit for the invoice date, not due date or payment date. Convert to ISO format (YYYY-MM-DD).
+- date: best fit for the invoice date, not due date, payment date, or print date. Convert to ISO format (YYYY-MM-DD).
 - currency: if not explicitly stated, assume ILS.
 - Morning category: choose the single best category from the provided Morning category list according to the vendor, document text, invoice/receipt descriptions, and extracted values. Use only an id from this list. If no category reasonably fits, return null for all Morning category fields.
 - confidence: high, medium, or low.
