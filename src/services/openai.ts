@@ -90,29 +90,6 @@ export type GmailInvoiceResolution = {
   reason: string | null;
 };
 
-const gmailInvoiceResolutionFormat = {
-  type: 'json_schema',
-  name: 'gmail_invoice_resolution',
-  strict: true,
-  schema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      kind: {
-        type: 'string',
-        enum: ['invoice_body', 'invoice_link', 'not_invoice'],
-      },
-      selectedLink: {
-        type: ['string', 'null'],
-      },
-      reason: {
-        type: ['string', 'null'],
-      },
-    },
-    required: ['kind', 'selectedLink', 'reason'],
-  },
-} as const;
-
 function buildGmailInvoiceResolutionPrompt(params: {
   subject: string;
   fromAddress: string;
@@ -167,7 +144,7 @@ export async function resolveGmailInvoiceSource(params: {
   links: Array<{ url: string; text: string; source: string }>;
 }): Promise<GmailInvoiceResolution> {
   const response = await client.responses.create({
-    model: 'gpt-5.5',
+    model: 'gpt-5.4',
     input: [
       {
         role: 'user',
@@ -179,10 +156,8 @@ export async function resolveGmailInvoiceSource(params: {
         ]
       }
     ],
-    max_output_tokens: 1000,
-    text: {
-      format: gmailInvoiceResolutionFormat,
-    },
+    max_output_tokens: 300,
+    temperature: 0,
   });
 
   const content = response.output_text;
@@ -222,7 +197,7 @@ export async function extractInvoiceData(
   const dataUrl = `data:${mimeType};base64,${base64File}`;
 
   const response = await client.responses.create({
-    model: 'gpt-5.5',
+    model: 'gpt-5.4',
     input: [
       {
         role: 'user',
@@ -240,6 +215,7 @@ export async function extractInvoiceData(
       }
     ],
     max_output_tokens: 700,
+    temperature: 0,
   });
 
   const content = response.output_text;
@@ -277,7 +253,7 @@ export async function selectMorningCategoryForInvoice(
   categories: MorningAccountingClassificationOption[]
 ): Promise<MorningAccountingClassificationOption | null> {
   const response = await client.responses.create({
-    model: 'gpt-5.5',
+    model: 'gpt-5.4',
     input: [
       {
         role: 'user',
@@ -303,6 +279,7 @@ export async function selectMorningCategoryForInvoice(
       }
     ],
     max_output_tokens: 150,
+    temperature: 0,
   });
 
   const content = response.output_text;
