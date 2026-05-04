@@ -1,7 +1,9 @@
-import { Pool } from '@neondatabase/serverless';
+import { neon } from '@neondatabase/serverless';
 import { logger } from '../logger';
 
-let pool: Pool | null = null;
+type NeonQuery = ReturnType<typeof neon<false, true>>;
+
+let sql: NeonQuery | null = null;
 let initializePromise: Promise<void> | null = null;
 
 function getConnectionString() {
@@ -14,13 +16,13 @@ function getConnectionString() {
   return connectionString;
 }
 
-function getPool() {
-  if (!pool) {
-    pool = new Pool({ connectionString: getConnectionString() });
-    logger.info('postgres connection pool created');
+function getSql() {
+  if (!sql) {
+    sql = neon<false, true>(getConnectionString(), { fullResults: true });
+    logger.info('neon http query client created');
   }
 
-  return pool;
+  return sql;
 }
 
 export async function initializeDatabase() {
@@ -29,7 +31,7 @@ export async function initializeDatabase() {
   initializePromise = (async () => {
     const startedAt = Date.now();
 
-    await getPool().query(`
+    await getSql().query(`
       CREATE TABLE IF NOT EXISTS invoices (
         id SERIAL PRIMARY KEY,
         "fileName" TEXT NOT NULL,
@@ -69,11 +71,11 @@ export async function initializeDatabase() {
 
 export async function query<T = any>(text: string, values: any[] = []): Promise<T[]> {
   await initializeDatabase();
-  const result = await getPool().query(text, values);
+  const result = await getSql().query(text, values);
   return result.rows as T[];
 }
 
 export async function execute(text: string, values: any[] = []) {
   await initializeDatabase();
-  return getPool().query(text, values);
+  return getSql().query(text, values);
 }
