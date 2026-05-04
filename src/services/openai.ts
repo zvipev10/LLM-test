@@ -90,6 +90,29 @@ export type GmailInvoiceResolution = {
   reason: string | null;
 };
 
+const gmailInvoiceResolutionFormat = {
+  type: 'json_schema',
+  name: 'gmail_invoice_resolution',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      kind: {
+        type: 'string',
+        enum: ['invoice_body', 'invoice_link', 'not_invoice'],
+      },
+      selectedLink: {
+        type: ['string', 'null'],
+      },
+      reason: {
+        type: ['string', 'null'],
+      },
+    },
+    required: ['kind', 'selectedLink', 'reason'],
+  },
+} as const;
+
 function buildGmailInvoiceResolutionPrompt(params: {
   subject: string;
   fromAddress: string;
@@ -156,7 +179,10 @@ export async function resolveGmailInvoiceSource(params: {
         ]
       }
     ],
-    max_output_tokens: 300,
+    max_output_tokens: 1000,
+    text: {
+      format: gmailInvoiceResolutionFormat,
+    },
   });
 
   const content = response.output_text;
