@@ -1,4 +1,5 @@
 import { InvoiceData } from '../types/invoice';
+import { execute, query } from './db';
 import { logger } from '../logger';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
@@ -27,8 +28,40 @@ export interface InvoiceWithFile extends StoredInvoice {
   fileData?: string;
 }
 
-function getDb() {
-  return require('./db').default;
+const INVOICE_COLUMNS = [
+  'id',
+  'fileName',
+  'mimeType',
+  'fileData',
+  'vendorName',
+  'date',
+  'totalWithVat',
+  'totalWithoutVat',
+  'vat',
+  'currency',
+  'confidence',
+  'status',
+  'printed',
+  'morningExpenseId',
+  'morningSyncStatus',
+  'morningSyncedAt',
+  'morningSyncError',
+  'morningFileSyncStatus',
+  'morningFileSyncedAt',
+  'morningFileSyncError',
+  'morningCategoryId',
+  'morningCategoryName',
+  'morningCategoryCode',
+  'createdAt',
+  'updatedAt'
+] as const;
+
+function quoteIdentifier(name: string) {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+function placeholders(count: number, startAt = 1) {
+  return Array.from({ length: count }, (_value, index) => `$${index + startAt}`).join(', ');
 }
 
 function validateFileData(invoice: InvoiceWithFile, rowIndex?: number) {
@@ -41,28 +74,14 @@ function validateFileData(invoice: InvoiceWithFile, rowIndex?: number) {
   }
 }
 
-function getInvoiceColumns(): Set<string> {
-  const db = getDb();
-  const columns = db.prepare('PRAGMA table_info(invoices)').all() as Array<{ name: string }>;
-  return new Set(columns.map((col) => col.name));
-}
-
 function normalizeComparableValue(value: any) {
   if (value === undefined || value === '') return null;
   return value;
 }
 
-export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number {
+export async function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): Promise<number> {
   const startedAt = Date.now();
-  const db = getDb();
   validateFileData(invoice, rowIndex);
-
-  const columns = getInvoiceColumns();
-  const hasVat = columns.has('vat');
-  const hasConfidence = columns.has('confidence');
-  const hasStatus = columns.has('status');
-  const hasPrinted = columns.has('printed');
-  const hasMorningCategory = columns.has('morningCategoryId') && columns.has('morningCategoryName') && columns.has('morningCategoryCode');
 
   const insertColumns = [
     'fileName',
@@ -72,7 +91,14 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
     'date',
     'totalWithVat',
     'totalWithoutVat',
-    'currency'
+    'currency',
+    'vat',
+    'confidence',
+    'status',
+    'printed',
+    'morningCategoryId',
+    'morningCategoryName',
+    'morningCategoryCode'
   ];
   const values = [
     invoice.fileName,
@@ -82,39 +108,23 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
     invoice.date ?? null,
     invoice.totalWithVat ?? null,
     invoice.totalWithoutVat ?? null,
-    invoice.currency || 'ILS'
+    invoice.currency || 'ILS',
+    invoice.vat ?? null,
+    invoice.confidence || null,
+    invoice.status || 'processed',
+    invoice.printed || '×œ×',
+    invoice.morningCategoryId ?? null,
+    invoice.morningCategoryName ?? null,
+    invoice.morningCategoryCode ?? null
   ];
 
-  if (hasVat) {
-    insertColumns.push('vat');
-    values.push(invoice.vat ?? null);
-  }
-  if (hasConfidence) {
-    insertColumns.push('confidence');
-    values.push(invoice.confidence || null);
-  }
-  if (hasStatus) {
-    insertColumns.push('status');
-    values.push(invoice.status || 'processed');
-  }
-  if (hasPrinted) {
-    insertColumns.push('printed');
-    values.push(invoice.printed || 'לא');
-  }
-
-  if (hasMorningCategory) {
-    insertColumns.push('morningCategoryId', 'morningCategoryName', 'morningCategoryCode');
-    values.push(
-      invoice.morningCategoryId ?? null,
-      invoice.morningCategoryName ?? null,
-      invoice.morningCategoryCode ?? null
-    );
-  }
-
-  const placeholders = insertColumns.map(() => '?').join(', ');
-  const stmt = db.prepare(`INSERT INTO invoices (${insertColumns.join(', ')}) VALUES (${placeholders})`);
-  const result = stmt.run(...values);
-  const id = result.lastInsertRowid as number;
+  const rows = await query<{ id: number }>(
+    `INSERT INTO invoices (${insertColumns.map(quoteIdentifier).join(', ')})
+     VALUES (${placeholders(values.length)})
+     RETURNING id`,
+    values
+  );
+  const id = rows[0].id;
   logger.info({
     invoiceId: id,
     rowIndex,
@@ -124,10 +134,10 @@ export function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): number
   return id;
 }
 
-export function getInvoiceById(id: number): StoredInvoice | null {
+export async function getInvoiceById(id: number): Promise<StoredInvoice | null> {
   const startedAt = Date.now();
-  const db = getDb();
-  const result = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id) as StoredInvoice | undefined;
+  const rows = await query<StoredInvoice>('SELECT * FROM invoices WHERE id = $1', [id]);
+  const result = rows[0];
   logger.info({
     invoiceId: id,
     found: Boolean(result),
@@ -136,11 +146,11 @@ export function getInvoiceById(id: number): StoredInvoice | null {
   return result || null;
 }
 
-export function hasInvoiceChanges(invoice: InvoiceWithFile): boolean {
+export async function hasInvoiceChanges(invoice: InvoiceWithFile): Promise<boolean> {
   const startedAt = Date.now();
   if (!invoice.id) return true;
 
-  const existing = getInvoiceById(invoice.id);
+  const existing = await getInvoiceById(invoice.id);
   if (!existing) {
     logger.info({
       invoiceId: invoice.id,
@@ -162,14 +172,11 @@ export function hasInvoiceChanges(invoice: InvoiceWithFile): boolean {
     [existing.vat, invoice.vat ?? null],
     [existing.confidence, invoice.confidence || null],
     [existing.status, invoice.status || 'processed'],
-    [existing.printed, invoice.printed || 'לא']
-  ];
-
-  comparisons.push(
+    [existing.printed, invoice.printed || '×œ×'],
     [existing.morningCategoryId, invoice.morningCategoryId ?? null],
     [existing.morningCategoryName, invoice.morningCategoryName ?? null],
     [existing.morningCategoryCode, invoice.morningCategoryCode ?? null]
-  );
+  ];
 
   const hasChanges = comparisons.some(([currentValue, incomingValue]) => {
     return normalizeComparableValue(currentValue) !== normalizeComparableValue(incomingValue);
@@ -182,20 +189,25 @@ export function hasInvoiceChanges(invoice: InvoiceWithFile): boolean {
   return hasChanges;
 }
 
-export function updateInvoice(invoice: InvoiceWithFile): boolean {
+export async function updateInvoice(invoice: InvoiceWithFile): Promise<boolean> {
   if (!invoice.id) return false;
 
   const startedAt = Date.now();
-  const db = getDb();
-  const columns = getInvoiceColumns();
   const assignments = [
-    'fileName = ?',
-    'mimeType = ?',
-    'vendorName = ?',
-    'date = ?',
-    'totalWithVat = ?',
-    'totalWithoutVat = ?',
-    'currency = ?'
+    'fileName',
+    'mimeType',
+    'vendorName',
+    'date',
+    'totalWithVat',
+    'totalWithoutVat',
+    'currency',
+    'vat',
+    'confidence',
+    'status',
+    'printed',
+    'morningCategoryId',
+    'morningCategoryName',
+    'morningCategoryCode'
   ];
   const values: any[] = [
     invoice.fileName,
@@ -204,95 +216,63 @@ export function updateInvoice(invoice: InvoiceWithFile): boolean {
     invoice.date ?? null,
     invoice.totalWithVat ?? null,
     invoice.totalWithoutVat ?? null,
-    invoice.currency || 'ILS'
+    invoice.currency || 'ILS',
+    invoice.vat ?? null,
+    invoice.confidence || null,
+    invoice.status || 'processed',
+    invoice.printed || '×œ×',
+    invoice.morningCategoryId ?? null,
+    invoice.morningCategoryName ?? null,
+    invoice.morningCategoryCode ?? null
   ];
 
   if (invoice.fileData) {
-    assignments.splice(2, 0, 'fileData = ?');
+    assignments.splice(2, 0, 'fileData');
     values.splice(2, 0, invoice.fileData);
   }
-  if (columns.has('vat')) {
-    assignments.push('vat = ?');
-    values.push(invoice.vat ?? null);
-  }
-  if (columns.has('confidence')) {
-    assignments.push('confidence = ?');
-    values.push(invoice.confidence || null);
-  }
-  if (columns.has('status')) {
-    assignments.push('status = ?');
-    values.push(invoice.status || 'processed');
-  }
-  if (columns.has('printed')) {
-    assignments.push('printed = ?');
-    values.push(invoice.printed || 'לא');
-  }
-  if (columns.has('morningCategoryId')) {
-    assignments.push('morningCategoryId = ?');
-    values.push(invoice.morningCategoryId ?? null);
-  }
-  if (columns.has('morningCategoryName')) {
-    assignments.push('morningCategoryName = ?');
-    values.push(invoice.morningCategoryName ?? null);
-  }
-  if (columns.has('morningCategoryCode')) {
-    assignments.push('morningCategoryCode = ?');
-    values.push(invoice.morningCategoryCode ?? null);
-  }
-  if (columns.has('updatedAt')) {
-    assignments.push('updatedAt = CURRENT_TIMESTAMP');
-  }
+
+  const setClause = assignments
+    .map((column, index) => `${quoteIdentifier(column)} = $${index + 1}`)
+    .concat('"updatedAt" = CURRENT_TIMESTAMP')
+    .join(', ');
 
   values.push(invoice.id);
-  const stmt = db.prepare(`UPDATE invoices SET ${assignments.join(', ')} WHERE id = ?`);
-  const result = stmt.run(...values);
-  const updated = result.changes > 0;
+  const result = await execute(`UPDATE invoices SET ${setClause} WHERE id = $${values.length}`, values);
+  const updated = (result.rowCount ?? 0) > 0;
   logger.info({
     invoiceId: invoice.id,
     updated,
-    changes: result.changes,
+    changes: result.rowCount,
     hasFileData: Boolean(invoice.fileData),
     durationMs: Date.now() - startedAt
   }, 'invoice updated');
   return updated;
 }
 
-export function updateInvoiceMorningCategory(
+export async function updateInvoiceMorningCategory(
   id: number,
   category: {
     morningCategoryId: string | null;
     morningCategoryName: string | null;
     morningCategoryCode: number | null;
   }
-): boolean {
+): Promise<boolean> {
   const startedAt = Date.now();
-  const db = getDb();
-  const columns = getInvoiceColumns();
-  const assignments: string[] = [];
-  const values: any[] = [];
-
-  if (columns.has('morningCategoryId')) {
-    assignments.push('morningCategoryId = ?');
-    values.push(category.morningCategoryId);
-  }
-  if (columns.has('morningCategoryName')) {
-    assignments.push('morningCategoryName = ?');
-    values.push(category.morningCategoryName);
-  }
-  if (columns.has('morningCategoryCode')) {
-    assignments.push('morningCategoryCode = ?');
-    values.push(category.morningCategoryCode);
-  }
-  if (columns.has('updatedAt')) {
-    assignments.push('updatedAt = CURRENT_TIMESTAMP');
-  }
-
-  if (assignments.length === 0) return false;
-
-  values.push(id);
-  const stmt = db.prepare(`UPDATE invoices SET ${assignments.join(', ')} WHERE id = ?`);
-  const result = stmt.run(...values);
-  const updated = result.changes > 0;
+  const result = await execute(
+    `UPDATE invoices
+     SET "morningCategoryId" = $1,
+         "morningCategoryName" = $2,
+         "morningCategoryCode" = $3,
+         "updatedAt" = CURRENT_TIMESTAMP
+     WHERE id = $4`,
+    [
+      category.morningCategoryId,
+      category.morningCategoryName,
+      category.morningCategoryCode,
+      id
+    ]
+  );
+  const updated = (result.rowCount ?? 0) > 0;
   logger.info({
     invoiceId: id,
     updated,
@@ -303,37 +283,29 @@ export function updateInvoiceMorningCategory(
   return updated;
 }
 
-export function deleteInvoice(id: number): boolean {
+export async function deleteInvoice(id: number): Promise<boolean> {
   const startedAt = Date.now();
-  const db = getDb();
-  const stmt = db.prepare('DELETE FROM invoices WHERE id = ?');
-  const result = stmt.run(id);
-  const deleted = result.changes > 0;
+  const result = await execute('DELETE FROM invoices WHERE id = $1', [id]);
+  const deleted = (result.rowCount ?? 0) > 0;
   logger.info({
     invoiceId: id,
     deleted,
-    changes: result.changes,
+    changes: result.rowCount,
     durationMs: Date.now() - startedAt
   }, 'invoice deleted');
   return deleted;
 }
 
-export function getInvoices(): StoredInvoice[] {
+export async function getInvoices(): Promise<StoredInvoice[]> {
   const startedAt = Date.now();
-  const db = getDb();
-  const columns = getInvoiceColumns();
-  const selectedColumns = Array.from(columns)
+  const selectedColumns = INVOICE_COLUMNS
     .filter((column) => column !== 'fileData')
-    .map((column) => `"${column.replace(/"/g, '""')}"`)
+    .map(quoteIdentifier)
     .join(', ');
 
-  const hasCreatedAt = columns.has('createdAt');
-
-  const query = hasCreatedAt
-    ? `SELECT ${selectedColumns} FROM invoices ORDER BY date ASC, createdAt ASC`
-    : `SELECT ${selectedColumns} FROM invoices ORDER BY date ASC, id ASC`;
-
-  const invoices = db.prepare(query).all();
+  const invoices = await query<StoredInvoice>(
+    `SELECT ${selectedColumns} FROM invoices ORDER BY date ASC NULLS LAST, "createdAt" ASC`
+  );
   logger.info({
     count: invoices.length,
     durationMs: Date.now() - startedAt
@@ -341,29 +313,31 @@ export function getInvoices(): StoredInvoice[] {
   return invoices;
 }
 
-export function getInvoiceFileData(id: number) {
-  const db = getDb();
-  return db.prepare('SELECT fileData, mimeType FROM invoices WHERE id = ?').get(id);
+export async function getInvoiceFileData(id: number) {
+  const rows = await query<{ fileData?: string; mimeType?: string | null }>(
+    'SELECT "fileData", "mimeType" FROM invoices WHERE id = $1',
+    [id]
+  );
+  return rows[0];
 }
 
-export function updateMorningSyncStatus(
+export async function updateMorningSyncStatus(
   id: number,
   status: 'sent' | 'failed',
   expenseId: string | null,
   error: string | null
-): boolean {
+): Promise<boolean> {
   const startedAt = Date.now();
-  const db = getDb();
-  const stmt = db.prepare(`
-    UPDATE invoices
-    SET morningExpenseId = ?,
-        morningSyncStatus = ?,
-        morningSyncedAt = CURRENT_TIMESTAMP,
-        morningSyncError = ?
-    WHERE id = ?
-  `);
-  const result = stmt.run(expenseId, status, error, id);
-  const updated = result.changes > 0;
+  const result = await execute(
+    `UPDATE invoices
+     SET "morningExpenseId" = $1,
+         "morningSyncStatus" = $2,
+         "morningSyncedAt" = CURRENT_TIMESTAMP,
+         "morningSyncError" = $3
+     WHERE id = $4`,
+    [expenseId, status, error, id]
+  );
+  const updated = (result.rowCount ?? 0) > 0;
   logger.info({
     invoiceId: id,
     status,
@@ -373,22 +347,21 @@ export function updateMorningSyncStatus(
   return updated;
 }
 
-export function updateMorningFileSyncStatus(
+export async function updateMorningFileSyncStatus(
   id: number,
   status: 'uploaded' | 'failed',
   error: string | null
-): boolean {
+): Promise<boolean> {
   const startedAt = Date.now();
-  const db = getDb();
-  const stmt = db.prepare(`
-    UPDATE invoices
-    SET morningFileSyncStatus = ?,
-        morningFileSyncedAt = CURRENT_TIMESTAMP,
-        morningFileSyncError = ?
-    WHERE id = ?
-  `);
-  const result = stmt.run(status, error, id);
-  const updated = result.changes > 0;
+  const result = await execute(
+    `UPDATE invoices
+     SET "morningFileSyncStatus" = $1,
+         "morningFileSyncedAt" = CURRENT_TIMESTAMP,
+         "morningFileSyncError" = $2
+     WHERE id = $3`,
+    [status, error, id]
+  );
+  const updated = (result.rowCount ?? 0) > 0;
   logger.info({
     invoiceId: id,
     status,

@@ -95,7 +95,7 @@ invoiceRouter.post(
   }
 );
 
-invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
+invoiceRouter.post('/save-batch', async (req: Request, res: Response) => {
   const startedAt = Date.now();
   try {
     const { invoices } = req.body;
@@ -107,18 +107,18 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
       });
     }
 
-    const existingInvoices = getInvoices();
+    const existingInvoices = await getInvoices();
     const existingIds = new Set(existingInvoices.map((inv: any) => inv.id));
     const incomingIds = new Set(invoices.filter((inv: any) => inv.id).map((inv: any) => inv.id));
 
     let deletedCount = 0;
 
-    existingIds.forEach((id) => {
+    for (const id of existingIds) {
       if (!incomingIds.has(id)) {
-        const deleted = deleteInvoice(id);
+        const deleted = await deleteInvoice(id);
         if (deleted) deletedCount += 1;
       }
-    });
+    }
 
     const ids: number[] = [];
     let savedCount = 0;
@@ -126,11 +126,11 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
     let insertedCount = 0;
     let unchangedCount = 0;
 
-    invoices.forEach((invoice, idx) => {
+    for (const [idx, invoice] of invoices.entries()) {
       if (invoice.id) {
-        const hasChanges = hasInvoiceChanges(invoice);
+        const hasChanges = await hasInvoiceChanges(invoice);
         if (hasChanges) {
-          const updated = updateInvoice(invoice);
+          const updated = await updateInvoice(invoice);
           if (updated) {
             ids.push(invoice.id);
             savedCount += 1;
@@ -140,12 +140,12 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
           unchangedCount += 1;
         }
       } else {
-        const id = saveInvoice(invoice, idx);
+        const id = await saveInvoice(invoice, idx);
         ids.push(id);
         savedCount += 1;
         insertedCount += 1;
       }
-    });
+    }
 
     logger.info({
       incomingCount: invoices.length,
@@ -177,10 +177,10 @@ invoiceRouter.post('/save-batch', (req: Request, res: Response) => {
   }
 });
 
-invoiceRouter.get('/list', (_req: Request, res: Response) => {
+invoiceRouter.get('/list', async (_req: Request, res: Response) => {
   const startedAt = Date.now();
   try {
-    const invoices = getInvoices();
+    const invoices = await getInvoices();
     logger.info({
       count: invoices.length,
       durationMs: Date.now() - startedAt
@@ -258,7 +258,7 @@ invoiceRouter.post('/morning/reclassify-categories', async (req: Request, res: R
     }
 
     const categories = await getMorningAccountingClassificationOptions(true);
-    const invoices = getInvoices()
+    const invoices = (await getInvoices())
       .filter((invoice) => !requestedIds || requestedIds.has(Number(invoice.id)))
       .filter((invoice) => !onlyMissing || !invoice.morningCategoryId);
 
@@ -281,7 +281,7 @@ invoiceRouter.post('/morning/reclassify-categories', async (req: Request, res: R
           (invoice.morningCategoryCode ?? null) !== nextCategory.morningCategoryCode;
 
         if (!dryRun && changed) {
-          updateInvoiceMorningCategory(invoice.id, nextCategory);
+          await updateInvoiceMorningCategory(invoice.id, nextCategory);
         }
 
         results.push({
@@ -368,7 +368,7 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
     const results: MorningSyncResult[] = [];
 
     for (const id of ids) {
-      const invoice = getInvoiceById(id);
+      const invoice = await getInvoiceById(id);
 
       if (!invoice) {
         results.push({ invoiceId: id, success: false, error: 'Invoice not found' });
@@ -387,14 +387,14 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
         }
 
         if (!existingExpenseId) {
-          updateMorningSyncStatus(id, 'sent', expenseId, null);
+          await updateMorningSyncStatus(id, 'sent', expenseId, null);
         }
 
         let morningFileSyncStatus: MorningSyncResult['morningFileSyncStatus'] = invoice.morningFileSyncStatus as MorningSyncResult['morningFileSyncStatus'] || null;
         let morningFileSyncError: string | null = null;
 
         if (invoice.morningFileSyncStatus !== 'uploaded') {
-          const fileData = getInvoiceFileData(id) as { fileData?: string; mimeType?: string | null } | undefined;
+          const fileData = await getInvoiceFileData(id) as { fileData?: string; mimeType?: string | null } | undefined;
 
           if (fileData?.fileData) {
             try {
@@ -405,11 +405,11 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
                 mimeType: fileData.mimeType,
                 fileBuffer: Buffer.from(fileData.fileData, 'base64')
               });
-              updateMorningFileSyncStatus(id, 'uploaded', null);
+              await updateMorningFileSyncStatus(id, 'uploaded', null);
               morningFileSyncStatus = 'uploaded';
             } catch (fileError) {
               morningFileSyncError = fileError instanceof Error ? fileError.message : String(fileError);
-              updateMorningFileSyncStatus(id, 'failed', morningFileSyncError);
+              await updateMorningFileSyncStatus(id, 'failed', morningFileSyncError);
               morningFileSyncStatus = 'failed';
               logger.error({
                 invoiceId: id,
@@ -433,7 +433,7 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        updateMorningSyncStatus(id, 'failed', null, errorMessage);
+        await updateMorningSyncStatus(id, 'failed', null, errorMessage);
         logger.error({
           invoiceId: id,
           error: errorMessage
@@ -476,7 +476,7 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
   }
 });
 
-invoiceRouter.get('/file/:id', (req: Request, res: Response) => {
+invoiceRouter.get('/file/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const invoiceId = parseInt(id);
@@ -485,7 +485,7 @@ invoiceRouter.get('/file/:id', (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Invalid invoice ID' });
     }
 
-    const fileData = getInvoiceFileData(invoiceId) as any;
+    const fileData = await getInvoiceFileData(invoiceId) as any;
 
     if (!fileData || !fileData.fileData) {
       return res.status(404).json({ success: false, error: 'File not found or no file data stored' });
@@ -503,9 +503,9 @@ invoiceRouter.get('/file/:id', (req: Request, res: Response) => {
   }
 });
 
-invoiceRouter.get('/stats', (_req: Request, res: Response) => {
+invoiceRouter.get('/stats', async (_req: Request, res: Response) => {
   try {
-    const invoices = getInvoices();
+    const invoices = await getInvoices();
     const stats = {
       total: invoices.length,
       totalRevenue: invoices.reduce((sum: number, inv: any) => sum + (inv.totalWithVat || 0), 0),

@@ -10,7 +10,11 @@ import { initializeMorningAccountingClassifications } from './services/morningCl
 
 dotenv.config();
 
-initializeDatabase();
+initializeDatabase().catch((error) => {
+  logger.error({
+    error: error instanceof Error ? error.message : String(error)
+  }, 'database startup initialization failed');
+});
 
 initializeMorningAccountingClassifications().catch((error) => {
   logger.error({
@@ -55,8 +59,10 @@ app.get('/health', (req, res) => {
 app.use('/api/invoices', invoiceRouter);
 app.use('/api/gmail', gmailRouter);
 
-app.listen(PORT, () => {
-  logger.info({ port: PORT }, 'server started');
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    logger.info({ port: PORT }, 'server started');
+  });
+}
 
 export default app;

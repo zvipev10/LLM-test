@@ -1,66 +1,79 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
+import { Pool } from '@neondatabase/serverless';
 import { logger } from '../logger';
 
-const dataDir = '/app/data';
-const dbPath = path.join(dataDir, 'invoices.db');
+let pool: Pool | null = null;
+let initializePromise: Promise<void> | null = null;
 
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
+function getConnectionString() {
+  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
 
-let db = new Database(dbPath);
-
-db.pragma('foreign_keys = ON');
-
-logger.info({ dbPath }, 'database connection opened');
-
-function ensureColumn(tableName: string, columnName: string, definition: string) {
-  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
-  const exists = columns.some((column) => column.name === columnName);
-  if (!exists) {
-    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  if (!connectionString) {
+    throw new Error('Missing DATABASE_URL or POSTGRES_URL for Neon Postgres connection');
   }
+
+  return connectionString;
 }
 
-export function initializeDatabase() {
-  const startedAt = Date.now();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS invoices (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      fileName TEXT NOT NULL,
-      mimeType TEXT,
-      fileData BLOB,
-      vendorName TEXT,
-      date TEXT,
-      totalWithVat REAL,
-      totalWithoutVat REAL,
-      vat REAL,
-      currency TEXT DEFAULT 'ILS',
-      confidence TEXT,
-      status TEXT DEFAULT 'processed',
-      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
+function getPool() {
+  if (!pool) {
+    pool = new Pool({ connectionString: getConnectionString() });
+    logger.info('postgres connection pool created');
+  }
 
-  ensureColumn('invoices', 'printed', "TEXT DEFAULT 'לא'");
-  ensureColumn('invoices', 'morningExpenseId', 'TEXT');
-  ensureColumn('invoices', 'morningSyncStatus', 'TEXT');
-  ensureColumn('invoices', 'morningSyncedAt', 'DATETIME');
-  ensureColumn('invoices', 'morningSyncError', 'TEXT');
-  ensureColumn('invoices', 'morningFileSyncStatus', 'TEXT');
-  ensureColumn('invoices', 'morningFileSyncedAt', 'DATETIME');
-  ensureColumn('invoices', 'morningFileSyncError', 'TEXT');
-  ensureColumn('invoices', 'morningCategoryId', 'TEXT');
-  ensureColumn('invoices', 'morningCategoryName', 'TEXT');
-  ensureColumn('invoices', 'morningCategoryCode', 'INTEGER');
-
-  logger.info({
-    dbPath,
-    durationMs: Date.now() - startedAt
-  }, 'database initialized');
+  return pool;
 }
 
-export default db;
+export async function initializeDatabase() {
+  if (initializePromise) return initializePromise;
+
+  initializePromise = (async () => {
+    const startedAt = Date.now();
+
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS invoices (
+        id SERIAL PRIMARY KEY,
+        "fileName" TEXT NOT NULL,
+        "mimeType" TEXT,
+        "fileData" TEXT,
+        "vendorName" TEXT,
+        date TEXT,
+        "totalWithVat" DOUBLE PRECISION,
+        "totalWithoutVat" DOUBLE PRECISION,
+        vat DOUBLE PRECISION,
+        currency TEXT DEFAULT 'ILS',
+        confidence TEXT,
+        status TEXT DEFAULT 'processed',
+        printed TEXT DEFAULT '×œ×',
+        "morningExpenseId" TEXT,
+        "morningSyncStatus" TEXT,
+        "morningSyncedAt" TIMESTAMPTZ,
+        "morningSyncError" TEXT,
+        "morningFileSyncStatus" TEXT,
+        "morningFileSyncedAt" TIMESTAMPTZ,
+        "morningFileSyncError" TEXT,
+        "morningCategoryId" TEXT,
+        "morningCategoryName" TEXT,
+        "morningCategoryCode" INTEGER,
+        "createdAt" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    logger.info({
+      durationMs: Date.now() - startedAt
+    }, 'postgres database initialized');
+  })();
+
+  return initializePromise;
+}
+
+export async function query<T = any>(text: string, values: any[] = []): Promise<T[]> {
+  await initializeDatabase();
+  const result = await getPool().query(text, values);
+  return result.rows as T[];
+}
+
+export async function execute(text: string, values: any[] = []) {
+  await initializeDatabase();
+  return getPool().query(text, values);
+}
