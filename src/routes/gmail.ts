@@ -11,6 +11,17 @@ function sanitizeFileName(value: string) {
   return value.replace(/[\\/:*?"<>|]+/g, '-').trim().slice(0, 120) || 'mail';
 }
 
+function createEmailBodyPdfBuffer(email: any) {
+  const bodyLines = [
+    `Subject: ${email.subject}`,
+    `From: ${email.fromAddress}`,
+    `Date: ${email.receivedAt}`,
+    '',
+    ...(email.textBody || email.htmlText || email.snippet).split('\n').filter(Boolean)
+  ];
+  return createSimplePdfBuffer(bodyLines);
+}
+
 type GmailDebug = {
   path?: string;
   selectedLink?: string | null;
@@ -150,7 +161,7 @@ gmailRouter.post('/sync', async (req, res) => {
           }
 
           let pdfBuffer: Buffer;
-          if (email.htmlBody) {
+          if (email.htmlBody && !process.env.VERCEL) {
             const rendered = await renderHtmlToPdf(email.htmlBody);
             pdfBuffer = rendered.buffer;
             gmailDebug.renderFinalUrl = rendered.finalUrl;
@@ -159,14 +170,9 @@ gmailRouter.post('/sync', async (req, res) => {
             gmailDebug.renderPdfBytes = rendered.pdfBytes;
             gmailDebug.renderCaptureMethod = rendered.captureMethod;
           } else {
-            const bodyLines = [
-              `Subject: ${email.subject}`,
-              `From: ${email.fromAddress}`,
-              `Date: ${email.receivedAt}`,
-              '',
-              ...(email.textBody || email.htmlText || email.snippet).split('\n').filter(Boolean)
-            ];
-            pdfBuffer = createSimplePdfBuffer(bodyLines);
+            pdfBuffer = createEmailBodyPdfBuffer(email);
+            gmailDebug.renderPdfBytes = pdfBuffer.length;
+            gmailDebug.renderCaptureMethod = process.env.VERCEL ? 'simple_pdf_vercel' : 'simple_pdf';
           }
 
           const processed = await processInvoiceFile(pdfBuffer, 'application/pdf', `${sanitizeFileName(email.subject || 'mail')}.pdf`);
