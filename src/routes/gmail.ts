@@ -161,7 +161,7 @@ gmailRouter.post('/sync', async (req, res) => {
           }
 
           let pdfBuffer: Buffer;
-          if (email.htmlBody && !process.env.VERCEL) {
+          if (email.htmlBody) {
             const rendered = await renderHtmlToPdf(email.htmlBody);
             pdfBuffer = rendered.buffer;
             gmailDebug.renderFinalUrl = rendered.finalUrl;
@@ -172,7 +172,7 @@ gmailRouter.post('/sync', async (req, res) => {
           } else {
             pdfBuffer = createEmailBodyPdfBuffer(email);
             gmailDebug.renderPdfBytes = pdfBuffer.length;
-            gmailDebug.renderCaptureMethod = process.env.VERCEL ? 'simple_pdf_vercel' : 'simple_pdf';
+            gmailDebug.renderCaptureMethod = 'simple_pdf';
           }
 
           const processed = await processInvoiceFile(pdfBuffer, 'application/pdf', `${sanitizeFileName(email.subject || 'mail')}.pdf`);
