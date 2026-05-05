@@ -1,5 +1,4 @@
 import { chromium } from 'playwright';
-import sparticuzChromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
 
 export type RenderedPagePdf = {
@@ -10,6 +9,12 @@ export type RenderedPagePdf = {
   pdfBytes: number;
   captureMethod: 'html_print';
 };
+
+async function loadSparticuzChromium() {
+  const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
+  const module = await dynamicImport('@sparticuz/chromium');
+  return module.default || module;
+}
 
 async function renderHtmlToPdfWithPlaywright(html: string): Promise<RenderedPagePdf> {
   const browser = await chromium.launch({
@@ -63,6 +68,7 @@ async function renderHtmlToPdfWithPlaywright(html: string): Promise<RenderedPage
 }
 
 async function renderHtmlToPdfWithBundledChromium(html: string): Promise<RenderedPagePdf> {
+  const sparticuzChromium = await loadSparticuzChromium();
   const browser = await puppeteer.launch({
     args: sparticuzChromium.args,
     defaultViewport: {
