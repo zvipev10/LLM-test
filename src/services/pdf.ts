@@ -1,7 +1,10 @@
 export async function convertPdfToImage(
   pdfBuffer: Buffer
 ): Promise<Buffer> {
-  const { pdf } = await import('pdf-to-img');
+  const dynamicImport = new Function('specifier', 'return import(specifier)') as (
+    specifier: string
+  ) => Promise<typeof import('pdf-to-img')>;
+  const { pdf } = await dynamicImport('pdf-to-img');
   const dataUrl = `data:application/pdf;base64,${pdfBuffer.toString('base64')}`;
   const document = await pdf(dataUrl, { scale: 3 });
   const imageBuffer = await document.getPage(1);
