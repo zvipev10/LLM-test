@@ -53,7 +53,13 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({
+    status: 'ok',
+    backend: 'vercel-neon',
+    pdfRenderer: 'pdf-to-img',
+    commit: process.env.VERCEL_GIT_COMMIT_SHA || null,
+    branch: process.env.VERCEL_GIT_COMMIT_REF || null
+  });
 });
 
 app.use('/api/invoices', invoiceRouter);
