@@ -5,6 +5,7 @@ type NeonQuery = ReturnType<typeof neon<false, true>>;
 
 let sql: NeonQuery | null = null;
 let initializePromise: Promise<void> | null = null;
+const RETRYABLE_DB_ERROR_PATTERN = /fetch failed|Error connecting to database|ECONNRESET|ETIMEDOUT|terminated/i;
 
 function getConnectionString() {
   const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
@@ -61,21 +62,71 @@ export async function initializeDatabase() {
       );
     `);
 
+    await getSql().query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value JSONB NOT NULL,
+        "updatedAt" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     logger.info({
       durationMs: Date.now() - startedAt
     }, 'postgres database initialized');
   })();
 
+  initializePromise.catch((err) => {
+    initializePromise = null;
+    logger.error({
+      error: err instanceof Error ? err.message : String(err)
+    }, 'postgres database initialization promise reset after failure');
+  });
+
   return initializePromise;
 }
 
+async function runWithRetry<T>(operation: () => Promise<T>, context: string): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await operation();
+    } catch (err) {
+      lastError = err;
+      const message = err instanceof Error ? err.message : String(err);
+      const retryable = RETRYABLE_DB_ERROR_PATTERN.test(message);
+
+      if (!retryable || attempt === 3) {
+        throw err;
+      }
+
+      sql = null;
+      initializePromise = null;
+
+      logger.warn({
+        context,
+        attempt,
+        error: message
+      }, 'retrying transient postgres operation failure');
+
+      await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+    }
+  }
+
+  throw lastError;
+}
+
 export async function query<T = any>(text: string, values: any[] = []): Promise<T[]> {
-  await initializeDatabase();
-  const result = await getSql().query(text, values);
-  return result.rows as T[];
+  return runWithRetry(async () => {
+    await initializeDatabase();
+    const result = await getSql().query(text, values);
+    return result.rows as T[];
+  }, 'query');
 }
 
 export async function execute(text: string, values: any[] = []) {
-  await initializeDatabase();
-  return getSql().query(text, values);
+  return runWithRetry(async () => {
+    await initializeDatabase();
+    return getSql().query(text, values);
+  }, 'execute');
 }

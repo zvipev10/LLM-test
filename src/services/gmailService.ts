@@ -1,4 +1,6 @@
 import { google } from 'googleapis'
+import { execute, query } from '../database/db'
+import { logger } from '../logger'
 
 const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
@@ -9,6 +11,56 @@ const oAuth2Client = new google.auth.OAuth2(
 )
 
 let tokens: any = null
+let tokenLoadPromise: Promise<any | null> | null = null
+
+async function loadStoredTokens() {
+  const rows = await query<{ value: any }>('SELECT value FROM app_settings WHERE key = $1', ['gmail_tokens'])
+  return rows[0]?.value || null
+}
+
+async function saveTokens(nextTokens: any) {
+  tokens = {
+    ...(tokens || {}),
+    ...nextTokens
+  }
+
+  await execute(
+    `
+      INSERT INTO app_settings (key, value, "updatedAt")
+      VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
+      ON CONFLICT (key)
+      DO UPDATE SET value = EXCLUDED.value, "updatedAt" = CURRENT_TIMESTAMP
+    `,
+    ['gmail_tokens', JSON.stringify(tokens)]
+  )
+
+  logger.info('gmail tokens persisted')
+}
+
+async function ensureTokensLoaded() {
+  if (tokens) return tokens
+
+  if (!tokenLoadPromise) {
+    tokenLoadPromise = loadStoredTokens()
+      .then((storedTokens) => {
+        tokens = storedTokens
+        return tokens
+      })
+      .finally(() => {
+        tokenLoadPromise = null
+      })
+  }
+
+  return tokenLoadPromise
+}
+
+oAuth2Client.on('tokens', (refreshedTokens) => {
+  saveTokens(refreshedTokens).catch((err) => {
+    logger.error({
+      error: err instanceof Error ? err.message : String(err)
+    }, 'gmail token refresh persistence failed')
+  })
+})
 
 export function getAuthUrl() {
   return oAuth2Client.generateAuthUrl({
@@ -20,13 +72,14 @@ export function getAuthUrl() {
 
 export async function handleOAuthCallback(code: string) {
   const { tokens: newTokens } = await oAuth2Client.getToken(code)
-  tokens = newTokens
+  await saveTokens(newTokens)
   oAuth2Client.setCredentials(tokens)
 }
 
-export function getGmailClient() {
-  if (!tokens) throw new Error('Gmail not connected')
-  oAuth2Client.setCredentials(tokens)
+export async function getGmailClient() {
+  const loadedTokens = await ensureTokensLoaded()
+  if (!loadedTokens) throw new Error('Gmail not connected')
+  oAuth2Client.setCredentials(loadedTokens)
   return google.gmail({ version: 'v1', auth: oAuth2Client })
 }
 
@@ -130,7 +183,7 @@ function extractLinks(textBody: string, htmlBody: string) {
 }
 
 async function getExactLabelId(labelName: string): Promise<string | null> {
-  const gmail = getGmailClient()
+  const gmail = await getGmailClient()
   const labelsRes = await gmail.users.labels.list({ userId: 'me' })
   const labels = labelsRes.data.labels || []
   const match = labels.find((label) => label.name === labelName)
@@ -138,7 +191,7 @@ async function getExactLabelId(labelName: string): Promise<string | null> {
 }
 
 export async function fetchEmails() {
-  const gmail = getGmailClient()
+  const gmail = await getGmailClient()
   const exactLabelName = process.env.GMAIL_LABEL_NAME || 'Heshbonit'
   const exactLabelId = await getExactLabelId(exactLabelName)
 
@@ -184,7 +237,7 @@ export async function fetchEmails() {
 }
 
 export async function downloadAttachment(messageId: string, attachmentId: string): Promise<Buffer> {
-  const gmail = getGmailClient()
+  const gmail = await getGmailClient()
   const attachment = await gmail.users.messages.attachments.get({ userId: 'me', messageId, id: attachmentId })
   const data = attachment.data.data || ''
   return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
