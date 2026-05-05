@@ -80,6 +80,59 @@ adminRouter.post('/import-invoices', async (req, res) => {
     });
   }
 
+  const result = await importInvoices(invoices);
+
+  return res.status(200).json(result);
+});
+
+adminRouter.post('/import-invoices-from-railway', async (req, res) => {
+  const railwayBaseUrl = String(req.body?.railwayBaseUrl || 'https://llm-test-production.up.railway.app').replace(/\/$/, '');
+  const limit = Number.isInteger(Number(req.body?.limit)) ? Math.max(1, Number(req.body.limit)) : 1;
+  const offset = Number.isInteger(Number(req.body?.offset)) ? Math.max(0, Number(req.body.offset)) : 0;
+  const exportUrl = `${railwayBaseUrl}/api/admin/export-invoices?limit=${encodeURIComponent(String(limit))}&offset=${encodeURIComponent(String(offset))}`;
+  const exportResponse = await fetch(exportUrl);
+  const exportText = await exportResponse.text();
+
+  if (!exportResponse.ok) {
+    return res.status(502).json({
+      success: false,
+      error: `Railway export failed with status ${exportResponse.status}`,
+      exportUrl,
+      response: exportText.slice(0, 1000)
+    });
+  }
+
+  const exported = JSON.parse(exportText) as {
+    totalCount?: number;
+    count?: number;
+    hasMore?: boolean;
+    invoices?: any[];
+  };
+
+  if (!Array.isArray(exported.invoices)) {
+    return res.status(502).json({
+      success: false,
+      error: 'Railway export did not return invoices array',
+      exportUrl
+    });
+  }
+
+  const result = await importInvoices(exported.invoices);
+
+  return res.status(200).json({
+    ...result,
+    source: {
+      railwayBaseUrl,
+      offset,
+      limit,
+      exportedCount: exported.count ?? exported.invoices.length,
+      totalCount: exported.totalCount ?? null,
+      hasMore: Boolean(exported.hasMore)
+    }
+  });
+});
+
+async function importInvoices(invoices: any[]) {
   let importedCount = 0;
   let skippedCount = 0;
   const results: Array<{ id: number | null; success: boolean; skipped?: boolean; error?: string }> = [];
@@ -127,11 +180,11 @@ adminRouter.post('/import-invoices', async (req, res) => {
     )
   `);
 
-  return res.status(200).json({
+  return {
     success: true,
     importedCount,
     skippedCount,
     total: invoices.length,
     results
-  });
-});
+  };
+}
