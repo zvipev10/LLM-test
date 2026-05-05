@@ -1,30 +1,22 @@
-import { fromBuffer } from 'pdf2pic';
-
 export async function convertPdfToImage(
   pdfBuffer: Buffer
 ): Promise<Buffer> {
-  const converter = fromBuffer(pdfBuffer, {
-    density: 200,
-    format: 'png',
-    width: 1654,
-    height: 2339
-  });
+  const { pdf } = await import('pdf-to-img');
+  const dataUrl = `data:application/pdf;base64,${pdfBuffer.toString('base64')}`;
+  const document = await pdf(dataUrl, { scale: 3 });
+  const imageBuffer = await document.getPage(1);
 
-  const result = await converter(1, { responseType: 'buffer' });
-
-  if (!result?.buffer || result.buffer.length === 0) {
-    throw new Error(
-      'PDF to image conversion failed — ensure GraphicsMagick and Ghostscript are installed'
-    );
+  if (!imageBuffer || imageBuffer.length === 0) {
+    throw new Error('PDF to image conversion failed');
   }
 
   // Validate PNG magic bytes: 89 50 4E 47
   const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
-  const isValidPng = PNG_MAGIC.every((byte, i) => result.buffer![i] === byte);
+  const isValidPng = PNG_MAGIC.every((byte, i) => imageBuffer[i] === byte);
   if (!isValidPng) {
-    const got = result.buffer.slice(0, 8).toString('hex');
+    const got = imageBuffer.slice(0, 8).toString('hex');
     throw new Error(`PDF conversion produced invalid image data (header: ${got})`);
   }
 
-  return Buffer.from(result.buffer);
+  return Buffer.from(imageBuffer);
 }
