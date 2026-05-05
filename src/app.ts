@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { invoiceRouter } from './routes/invoices';
 import { gmailRouter } from './routes/gmail';
+import { adminRouter } from './routes/admin';
 import { initializeDatabase } from './database/db';
 import { logger } from './logger';
 import { initializeMorningAccountingClassifications } from './services/morningClient';
@@ -64,6 +65,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api/invoices', invoiceRouter);
 app.use('/api/gmail', gmailRouter);
+app.use('/api/admin', adminRouter);
 
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
