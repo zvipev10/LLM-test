@@ -8,6 +8,7 @@
         "includeFiles": [
           "node_modules/@napi-rs/canvas/**",
           "node_modules/@sparticuz/chromium/**",
+          "node_modules/follow-redirects/**",
           "node_modules/pdf-to-img/**",
           "node_modules/pdfjs-dist/**",
           "node_modules/puppeteer-core/**"
