@@ -6,6 +6,7 @@
       "use": "@vercel/node",
       "config": {
         "includeFiles": [
+          "node_modules/@napi-rs/canvas/**",
           "node_modules/pdf-to-img/**",
           "node_modules/pdfjs-dist/**"
         ]
