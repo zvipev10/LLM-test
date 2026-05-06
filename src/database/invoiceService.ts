@@ -9,6 +9,7 @@ export interface StoredInvoice extends InvoiceData {
   fileName: string;
   mimeType?: string;
   vat?: number;
+  originalTotalWithVat?: number | null;
   status?: string;
   createdAt?: string;
   printed?: string;
@@ -36,6 +37,7 @@ const INVOICE_COLUMNS = [
   'vendorName',
   'date',
   'totalWithVat',
+  'originalTotalWithVat',
   'totalWithoutVat',
   'vat',
   'currency',
@@ -92,6 +94,7 @@ export async function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): 
     'vendorName',
     'date',
     'totalWithVat',
+    'originalTotalWithVat',
     'totalWithoutVat',
     'currency',
     'vat',
@@ -109,6 +112,7 @@ export async function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): 
     invoice.vendorName ?? null,
     invoice.date ?? null,
     invoice.totalWithVat ?? null,
+    invoice.originalTotalWithVat ?? invoice.totalWithVat ?? null,
     invoice.totalWithoutVat ?? null,
     invoice.currency || 'ILS',
     invoice.vat ?? null,
@@ -190,6 +194,7 @@ export async function hasInvoiceChanges(invoice: InvoiceWithFile): Promise<boole
     [existing.vendorName, invoice.vendorName ?? null],
     [existing.date, invoice.date ?? null],
     [existing.totalWithVat, invoice.totalWithVat ?? null],
+    [existing.originalTotalWithVat, invoice.originalTotalWithVat ?? invoice.totalWithVat ?? null],
     [existing.totalWithoutVat, invoice.totalWithoutVat ?? null],
     [existing.currency, invoice.currency || 'ILS'],
     [existing.vat, invoice.vat ?? null],
@@ -222,6 +227,7 @@ export async function updateInvoice(invoice: InvoiceWithFile): Promise<boolean> 
     'vendorName',
     'date',
     'totalWithVat',
+    'originalTotalWithVat',
     'totalWithoutVat',
     'currency',
     'vat',
@@ -238,6 +244,7 @@ export async function updateInvoice(invoice: InvoiceWithFile): Promise<boolean> 
     invoice.vendorName ?? null,
     invoice.date ?? null,
     invoice.totalWithVat ?? null,
+    invoice.originalTotalWithVat ?? invoice.totalWithVat ?? null,
     invoice.totalWithoutVat ?? null,
     invoice.currency || 'ILS',
     invoice.vat ?? null,

@@ -2,6 +2,7 @@ export interface InvoiceData {
   vendorName: string | null;
   date: string | null;
   totalWithVat: number | null;
+  originalTotalWithVat?: number | null;
   totalWithoutVat: number | null;
   currency: string | null;
   morningCategoryId?: string | null;

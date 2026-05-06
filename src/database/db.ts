@@ -41,6 +41,7 @@ export async function initializeDatabase() {
         "vendorName" TEXT,
         date TEXT,
         "totalWithVat" DOUBLE PRECISION,
+        "originalTotalWithVat" DOUBLE PRECISION,
         "totalWithoutVat" DOUBLE PRECISION,
         vat DOUBLE PRECISION,
         currency TEXT DEFAULT 'ILS',
@@ -68,6 +69,18 @@ export async function initializeDatabase() {
         value JSONB NOT NULL,
         "updatedAt" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    await getSql().query(`
+      ALTER TABLE invoices
+      ADD COLUMN IF NOT EXISTS "originalTotalWithVat" DOUBLE PRECISION;
+    `);
+
+    await getSql().query(`
+      UPDATE invoices
+      SET "originalTotalWithVat" = "totalWithVat"
+      WHERE "originalTotalWithVat" IS NULL
+        AND "totalWithVat" IS NOT NULL;
     `);
 
     logger.info({
