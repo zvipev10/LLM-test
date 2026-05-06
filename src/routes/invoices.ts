@@ -67,10 +67,40 @@ invoiceRouter.post(
       const files = req.files as Express.Multer.File[];
 
       const results = await Promise.all(
-        files.map(async (file) => {
+        files.map(async (file, index) => {
           try {
             const { buffer, mimetype, originalname } = file;
-            return await processInvoiceFile(buffer, mimetype, originalname);
+            const processed = await processInvoiceFile(buffer, mimetype, originalname);
+
+            if (processed.success) {
+              const { fileData, data, filename, mimeType, ...rest } = processed;
+              const id = await saveInvoice({
+                fileName: filename,
+                mimeType,
+                fileData,
+                vendorName: data.vendorName,
+                date: data.date,
+                totalWithVat: data.totalWithVat,
+                totalWithoutVat: data.totalWithoutVat,
+                vat: data.totalWithVat != null && data.totalWithoutVat != null ? data.totalWithVat - data.totalWithoutVat : undefined,
+                currency: data.currency || 'ILS',
+                confidence: data.confidence || 'medium',
+                morningCategoryId: data.morningCategoryId ?? null,
+                morningCategoryName: data.morningCategoryName ?? null,
+                morningCategoryCode: data.morningCategoryCode ?? null
+              }, index);
+
+              return {
+                ...rest,
+                success: true,
+                id,
+                filename,
+                mimeType,
+                data
+              };
+            }
+
+            return processed;
           } catch (err) {
             return {
               success: false,

@@ -3,6 +3,7 @@ import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, creat
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { resolveGmailInvoiceSource } from '../services/openai';
 import { renderHtmlToPdf } from '../services/browserRenderer';
+import { saveInvoice } from '../database/invoiceService';
 import { logger } from '../logger';
 
 export const gmailRouter = Router();
@@ -20,6 +21,36 @@ function createEmailBodyPdfBuffer(email: any) {
     ...(email.textBody || email.htmlText || email.snippet).split('\n').filter(Boolean)
   ];
   return createSimplePdfBuffer(bodyLines);
+}
+
+async function saveProcessedInvoice(processed: any) {
+  if (!processed.success) return processed;
+
+  const { fileData, data, filename, mimeType, ...rest } = processed;
+  const id = await saveInvoice({
+    fileName: filename,
+    mimeType,
+    fileData,
+    vendorName: data.vendorName,
+    date: data.date,
+    totalWithVat: data.totalWithVat,
+    totalWithoutVat: data.totalWithoutVat,
+    vat: data.totalWithVat != null && data.totalWithoutVat != null ? data.totalWithVat - data.totalWithoutVat : undefined,
+    currency: data.currency || 'ILS',
+    confidence: data.confidence || 'medium',
+    morningCategoryId: data.morningCategoryId ?? null,
+    morningCategoryName: data.morningCategoryName ?? null,
+    morningCategoryCode: data.morningCategoryCode ?? null
+  });
+
+  return {
+    ...rest,
+    success: true,
+    id,
+    filename,
+    mimeType,
+    data
+  };
 }
 
 type GmailDebug = {
@@ -89,6 +120,7 @@ gmailRouter.post('/sync', async (req, res) => {
           try {
             const buffer = await downloadAttachment(email.gmailMessageId, att.attachmentId);
             const processed = await processInvoiceFile(buffer, att.mimeType, att.fileName);
+            const saved = await saveProcessedInvoice(processed);
             logger.info({
               ...baseDebug,
               path: 'attachment',
@@ -96,7 +128,7 @@ gmailRouter.post('/sync', async (req, res) => {
               mimeType: att.mimeType,
               bytes: buffer.length
             }, 'gmail sync attachment processed');
-            results.push({ ...processed, source: 'gmail', gmailDebug });
+            results.push({ ...saved, source: 'gmail', gmailDebug });
           } catch (err: any) {
             gmailDebug.path = 'failed';
             gmailDebug.error = err.message;
@@ -176,6 +208,7 @@ gmailRouter.post('/sync', async (req, res) => {
           }
 
           const processed = await processInvoiceFile(pdfBuffer, 'application/pdf', `${sanitizeFileName(email.subject || 'mail')}.pdf`);
+          const saved = await saveProcessedInvoice(processed);
           gmailDebug.path = 'email_body';
           logger.info({
             ...baseDebug,
@@ -185,7 +218,7 @@ gmailRouter.post('/sync', async (req, res) => {
             renderBodyPreview: gmailDebug.renderBodyPreview,
             renderCaptureMethod: gmailDebug.renderCaptureMethod
           }, 'gmail sync email body processed');
-          results.push({ ...processed, source: 'gmail', gmailResolution: 'email_body', gmailDebug });
+          results.push({ ...saved, source: 'gmail', gmailResolution: 'email_body', gmailDebug });
         } catch (err: any) {
           gmailDebug.path = 'failed';
           gmailDebug.error = err.message;
