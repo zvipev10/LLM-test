@@ -180,6 +180,11 @@ invoiceRouter.post('/save-batch', async (req: Request, res: Response) => {
 invoiceRouter.get('/list', async (_req: Request, res: Response) => {
   const startedAt = Date.now();
   try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.set('Surrogate-Control', 'no-store');
+
     const invoices = await getInvoices();
     logger.info({
       count: invoices.length,
