@@ -70,12 +70,6 @@ export async function initializeDatabase() {
       );
     `);
 
-    await getSql().query(`
-      UPDATE invoices
-      SET printed = 'לא'
-      WHERE printed IN ('×œ×', 'Ã—Å“Ã—Â');
-    `);
-
     logger.info({
       durationMs: Date.now() - startedAt
     }, 'postgres database initialized');
