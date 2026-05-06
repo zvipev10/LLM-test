@@ -54,7 +54,7 @@ function normalizeInvoice(invoice: any) {
     currency: invoice.currency || 'ILS',
     confidence: invoice.confidence ?? null,
     status: invoice.status || 'processed',
-    printed: invoice.printed || '×œ×',
+    printed: invoice.printed || 'לא',
     morningExpenseId: invoice.morningExpenseId ?? null,
     morningSyncStatus: invoice.morningSyncStatus ?? null,
     morningSyncedAt: normalizeDateTime(invoice.morningSyncedAt),

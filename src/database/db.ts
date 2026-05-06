@@ -46,7 +46,7 @@ export async function initializeDatabase() {
         currency TEXT DEFAULT 'ILS',
         confidence TEXT,
         status TEXT DEFAULT 'processed',
-        printed TEXT DEFAULT '×œ×',
+        printed TEXT DEFAULT 'לא',
         "morningExpenseId" TEXT,
         "morningSyncStatus" TEXT,
         "morningSyncedAt" TIMESTAMPTZ,
@@ -68,6 +68,12 @@ export async function initializeDatabase() {
         value JSONB NOT NULL,
         "updatedAt" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    await getSql().query(`
+      UPDATE invoices
+      SET printed = 'לא'
+      WHERE printed IN ('×œ×', 'Ã—Å“Ã—Â');
     `);
 
     logger.info({

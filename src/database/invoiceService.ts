@@ -56,6 +56,8 @@ const INVOICE_COLUMNS = [
   'updatedAt'
 ] as const;
 
+const DEFAULT_PRINTED = 'לא';
+
 function quoteIdentifier(name: string) {
   return `"${name.replace(/"/g, '""')}"`;
 }
@@ -112,7 +114,7 @@ export async function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): 
     invoice.vat ?? null,
     invoice.confidence || null,
     invoice.status || 'processed',
-    invoice.printed || '×œ×',
+    invoice.printed || DEFAULT_PRINTED,
     invoice.morningCategoryId ?? null,
     invoice.morningCategoryName ?? null,
     invoice.morningCategoryCode ?? null
@@ -193,7 +195,7 @@ export async function hasInvoiceChanges(invoice: InvoiceWithFile): Promise<boole
     [existing.vat, invoice.vat ?? null],
     [existing.confidence, invoice.confidence || null],
     [existing.status, invoice.status || 'processed'],
-    [existing.printed, invoice.printed || '×œ×'],
+    [existing.printed, invoice.printed || DEFAULT_PRINTED],
     [existing.morningCategoryId, invoice.morningCategoryId ?? null],
     [existing.morningCategoryName, invoice.morningCategoryName ?? null],
     [existing.morningCategoryCode, invoice.morningCategoryCode ?? null]
@@ -241,7 +243,7 @@ export async function updateInvoice(invoice: InvoiceWithFile): Promise<boolean> 
     invoice.vat ?? null,
     invoice.confidence || null,
     invoice.status || 'processed',
-    invoice.printed || '×œ×',
+    invoice.printed || DEFAULT_PRINTED,
     invoice.morningCategoryId ?? null,
     invoice.morningCategoryName ?? null,
     invoice.morningCategoryCode ?? null
