@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { del } from '@vercel/blob';
+import { generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
@@ -9,6 +11,14 @@ import { selectMorningCategoryForInvoice } from '../services/openai';
 import type { MorningAccountingClassificationOption } from '../services/morningClient';
 
 export const invoiceRouter = Router();
+
+const BLOB_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const ALLOWED_INVOICE_CONTENT_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp'
+];
 
 type MorningSyncResult = {
   invoiceId: number;
@@ -52,6 +62,164 @@ function toStoredMorningCategory(category: MorningAccountingClassificationOption
   };
 }
 
+function sanitizeBlobPathSegment(value: string) {
+  const sanitized = value
+    .normalize('NFKD')
+    .replace(/[^\w.\-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return sanitized || 'invoice';
+}
+
+function inferInvoiceContentType(fileName: string, fallback?: string | null) {
+  if (fallback && fallback !== 'application/octet-stream') return fallback;
+
+  const lowerName = fileName.toLowerCase();
+  if (lowerName.endsWith('.pdf')) return 'application/pdf';
+  if (lowerName.endsWith('.png')) return 'image/png';
+  if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) return 'image/jpeg';
+  if (lowerName.endsWith('.webp')) return 'image/webp';
+  return fallback || 'application/octet-stream';
+}
+
+async function saveProcessedInvoiceResult(processed: any, index = 0) {
+  const { fileData, data, filename, mimeType, ...rest } = processed;
+  const id = await saveInvoice({
+    fileName: filename,
+    mimeType,
+    fileData,
+    vendorName: data.vendorName,
+    date: data.date,
+    totalWithVat: data.totalWithVat,
+    totalWithoutVat: data.totalWithoutVat,
+    vat: data.totalWithVat != null && data.totalWithoutVat != null ? data.totalWithVat - data.totalWithoutVat : undefined,
+    currency: data.currency || 'ILS',
+    confidence: data.confidence || 'medium',
+    morningCategoryId: data.morningCategoryId ?? null,
+    morningCategoryName: data.morningCategoryName ?? null,
+    morningCategoryCode: data.morningCategoryCode ?? null
+  }, index);
+
+  return {
+    ...rest,
+    success: true,
+    id,
+    filename,
+    mimeType,
+    data
+  };
+}
+
+invoiceRouter.post('/blob-token', async (req: Request, res: Response) => {
+  try {
+    const { filename, contentType, size } = req.body || {};
+
+    if (!filename || typeof filename !== 'string') {
+      return res.status(400).json({ success: false, error: 'filename is required' });
+    }
+
+    const resolvedContentType = inferInvoiceContentType(filename, typeof contentType === 'string' ? contentType : null);
+    if (!ALLOWED_INVOICE_CONTENT_TYPES.includes(resolvedContentType)) {
+      return res.status(400).json({ success: false, error: 'Unsupported file type' });
+    }
+
+    if (Number(size) > BLOB_UPLOAD_MAX_BYTES) {
+      return res.status(400).json({ success: false, error: 'Uploaded file is too large' });
+    }
+
+    const pathname = `invoice-uploads/${Date.now()}-${sanitizeBlobPathSegment(filename)}`;
+    const token = await generateClientTokenFromReadWriteToken({
+      pathname,
+      addRandomSuffix: true,
+      maximumSizeInBytes: BLOB_UPLOAD_MAX_BYTES,
+      allowedContentTypes: ALLOWED_INVOICE_CONTENT_TYPES
+    });
+
+    return res.status(200).json({
+      success: true,
+      pathname,
+      token
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, 'blob upload token generation failed');
+    return res.status(500).json({ success: false, error: errorMessage });
+  }
+});
+
+invoiceRouter.post('/process-blob', async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  const { url, filename, mimeType } = req.body || {};
+
+  try {
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ success: false, error: 'url is required' });
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to download uploaded blob: ${response.status} ${response.statusText}`);
+    }
+
+    const contentLength = Number(response.headers.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > BLOB_UPLOAD_MAX_BYTES) {
+      throw new Error('Uploaded file is too large');
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength > BLOB_UPLOAD_MAX_BYTES) {
+      throw new Error('Uploaded file is too large');
+    }
+
+    const resolvedFilename = typeof filename === 'string' && filename ? filename : 'invoice';
+    const resolvedMimeType = inferInvoiceContentType(
+      resolvedFilename,
+      typeof mimeType === 'string' && mimeType ? mimeType : response.headers.get('content-type')
+    );
+
+    const processed = await processInvoiceFile(Buffer.from(arrayBuffer), resolvedMimeType, resolvedFilename);
+    if (!processed.success) {
+      return res.status(200).json({ success: true, result: processed });
+    }
+
+    const result = await saveProcessedInvoiceResult(processed);
+
+    try {
+      await del(url);
+    } catch (cleanupError) {
+      logger.warn({
+        url,
+        error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+      }, 'uploaded blob cleanup failed');
+    }
+
+    logger.info({
+      filename: resolvedFilename,
+      bytes: arrayBuffer.byteLength,
+      invoiceId: result.id,
+      durationMs: Date.now() - startedAt
+    }, 'blob invoice processed');
+
+    return res.status(200).json({
+      success: true,
+      result
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({
+      url,
+      filename,
+      error: errorMessage,
+      durationMs: Date.now() - startedAt
+    }, 'blob invoice processing failed');
+    return res.status(500).json({
+      success: false,
+      error: errorMessage
+    });
+  }
+});
+
 invoiceRouter.post(
   '/upload',
   upload.array('invoices', 20),
@@ -73,31 +241,7 @@ invoiceRouter.post(
             const processed = await processInvoiceFile(buffer, mimetype, originalname);
 
             if (processed.success) {
-              const { fileData, data, filename, mimeType, ...rest } = processed;
-              const id = await saveInvoice({
-                fileName: filename,
-                mimeType,
-                fileData,
-                vendorName: data.vendorName,
-                date: data.date,
-                totalWithVat: data.totalWithVat,
-                totalWithoutVat: data.totalWithoutVat,
-                vat: data.totalWithVat != null && data.totalWithoutVat != null ? data.totalWithVat - data.totalWithoutVat : undefined,
-                currency: data.currency || 'ILS',
-                confidence: data.confidence || 'medium',
-                morningCategoryId: data.morningCategoryId ?? null,
-                morningCategoryName: data.morningCategoryName ?? null,
-                morningCategoryCode: data.morningCategoryCode ?? null
-              }, index);
-
-              return {
-                ...rest,
-                success: true,
-                id,
-                filename,
-                mimeType,
-                data
-              };
+              return saveProcessedInvoiceResult(processed, index);
             }
 
             return processed;

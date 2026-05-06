@@ -14,6 +14,7 @@
     "@napi-rs/canvas": "^1.0.0",
     "@neondatabase/serverless": "^1.1.0",
     "@sparticuz/chromium": "^137.0.1",
+    "@vercel/blob": "^2.3.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.1",
     "express": "^4.18.2",
