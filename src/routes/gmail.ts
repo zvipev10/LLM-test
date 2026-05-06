@@ -3,7 +3,7 @@ import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, creat
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { resolveGmailInvoiceSource } from '../services/openai';
 import { renderHtmlToPdf } from '../services/browserRenderer';
-import { saveInvoice } from '../database/invoiceService';
+import { findDuplicateInvoice, saveInvoice } from '../database/invoiceService';
 import { logger } from '../logger';
 
 export const gmailRouter = Router();
@@ -27,6 +27,28 @@ async function saveProcessedInvoice(processed: any) {
   if (!processed.success) return processed;
 
   const { fileData, data, filename, mimeType, ...rest } = processed;
+  const duplicate = await findDuplicateInvoice(data.date, data.totalWithVat);
+
+  if (duplicate) {
+    logger.info({
+      filename,
+      duplicateInvoiceId: duplicate.id,
+      date: data.date,
+      totalWithVat: data.totalWithVat
+    }, 'duplicate gmail invoice skipped before insert');
+
+    return {
+      ...rest,
+      success: false,
+      duplicate: true,
+      filename,
+      mimeType,
+      data,
+      existingInvoice: duplicate,
+      error: 'Duplicate invoice already exists'
+    };
+  }
+
   const id = await saveInvoice({
     fileName: filename,
     mimeType,

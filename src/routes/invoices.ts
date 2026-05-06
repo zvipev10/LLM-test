@@ -4,7 +4,7 @@ import { generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
-import { getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
+import { findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
 import { logger } from '../logger';
 import { getMorningAccountingClassificationOptions, sendInvoiceToMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
 import { selectMorningCategoryForInvoice } from '../services/openai';
@@ -85,6 +85,28 @@ function inferInvoiceContentType(fileName: string, fallback?: string | null) {
 
 async function saveProcessedInvoiceResult(processed: any, index = 0) {
   const { fileData, data, filename, mimeType, ...rest } = processed;
+  const duplicate = await findDuplicateInvoice(data.date, data.totalWithVat);
+
+  if (duplicate) {
+    logger.info({
+      filename,
+      duplicateInvoiceId: duplicate.id,
+      date: data.date,
+      totalWithVat: data.totalWithVat
+    }, 'duplicate invoice skipped before insert');
+
+    return {
+      ...rest,
+      success: false,
+      duplicate: true,
+      filename,
+      mimeType,
+      data,
+      existingInvoice: duplicate,
+      error: 'Duplicate invoice already exists'
+    };
+  }
+
   const id = await saveInvoice({
     fileName: filename,
     mimeType,

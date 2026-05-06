@@ -134,6 +134,27 @@ export async function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): 
   return id;
 }
 
+export async function findDuplicateInvoice(date?: string | null, totalWithVat?: number | null): Promise<StoredInvoice | null> {
+  if (!date || totalWithVat === null || totalWithVat === undefined) return null;
+
+  const selectedColumns = INVOICE_COLUMNS
+    .filter((column) => column !== 'fileData')
+    .map(quoteIdentifier)
+    .join(', ');
+
+  const rows = await query<StoredInvoice>(
+    `SELECT ${selectedColumns}
+     FROM invoices
+     WHERE date = $1
+       AND ROUND("totalWithVat"::numeric, 2) = ROUND($2::numeric, 2)
+     ORDER BY "createdAt" ASC
+     LIMIT 1`,
+    [date, totalWithVat]
+  );
+
+  return rows[0] || null;
+}
+
 export async function getInvoiceById(id: number): Promise<StoredInvoice | null> {
   const startedAt = Date.now();
   const rows = await query<StoredInvoice>('SELECT * FROM invoices WHERE id = $1', [id]);
