@@ -4,7 +4,7 @@ import { generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
-import { approveInvoices, findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
+import { approveInvoices, findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, updateInvoiceFields, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
 import { logger } from '../logger';
 import { getMorningAccountingClassificationOptions, sendInvoiceToMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
 import { selectMorningCategoryForInvoice } from '../services/openai';
@@ -434,6 +434,56 @@ invoiceRouter.post('/approve', async (req: Request, res: Response) => {
       error: errorMessage,
       durationMs: Date.now() - startedAt
     }, 'invoice approve failed');
+    return res.status(500).json({ success: false, error: errorMessage });
+  }
+});
+
+invoiceRouter.patch('/:id', async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, error: 'Valid invoice id is required' });
+    }
+
+    const updated = await updateInvoiceFields(id, req.body || {});
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Invoice not found' });
+    }
+
+    return res.status(200).json({ success: true, id });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({
+      invoiceId: req.params.id,
+      error: errorMessage,
+      durationMs: Date.now() - startedAt
+    }, 'invoice patch failed');
+    return res.status(500).json({ success: false, error: errorMessage });
+  }
+});
+
+invoiceRouter.delete('/:id', async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, error: 'Valid invoice id is required' });
+    }
+
+    const deleted = await deleteInvoice(id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: 'Invoice not found' });
+    }
+
+    return res.status(200).json({ success: true, id });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({
+      invoiceId: req.params.id,
+      error: errorMessage,
+      durationMs: Date.now() - startedAt
+    }, 'invoice delete failed');
     return res.status(500).json({ success: false, error: errorMessage });
   }
 });

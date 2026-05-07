@@ -284,6 +284,60 @@ export async function updateInvoice(invoice: InvoiceWithFile): Promise<boolean> 
   return updated;
 }
 
+export async function updateInvoiceFields(id: number, fields: Partial<InvoiceWithFile>): Promise<boolean> {
+  if (!id) return false;
+
+  const allowedFields = [
+    'vendorName',
+    'date',
+    'totalWithVat',
+    'originalTotalWithVat',
+    'totalWithoutVat',
+    'currency',
+    'vat',
+    'confidence',
+    'status',
+    'printed',
+    'morningCategoryId',
+    'morningCategoryName',
+    'morningCategoryCode'
+  ] as const;
+
+  const assignments: string[] = [];
+  const values: any[] = [];
+
+  for (const field of allowedFields) {
+    if (!Object.prototype.hasOwnProperty.call(fields, field)) continue;
+
+    let value = (fields as any)[field];
+    if (field === 'status') value = normalizeInvoiceStatus(value);
+    if (field === 'currency') value = value || 'ILS';
+    if (field === 'printed') value = value || DEFAULT_PRINTED;
+
+    assignments.push(`${quoteIdentifier(field)} = $${values.length + 1}`);
+    values.push(value ?? null);
+  }
+
+  if (assignments.length === 0) return true;
+
+  assignments.push('"updatedAt" = CURRENT_TIMESTAMP');
+  values.push(id);
+
+  const startedAt = Date.now();
+  const result = await execute(
+    `UPDATE invoices SET ${assignments.join(', ')} WHERE id = $${values.length}`,
+    values
+  );
+  const updated = (result.rowCount ?? 0) > 0;
+  logger.info({
+    invoiceId: id,
+    updated,
+    fields: Object.keys(fields),
+    durationMs: Date.now() - startedAt
+  }, 'invoice fields updated');
+  return updated;
+}
+
 export async function updateInvoiceMorningCategory(
   id: number,
   category: {
