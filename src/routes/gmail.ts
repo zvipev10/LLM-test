@@ -61,6 +61,7 @@ async function saveProcessedInvoice(processed: any) {
     vat: data.totalWithVat != null && data.totalWithoutVat != null ? data.totalWithVat - data.totalWithoutVat : undefined,
     currency: data.currency || 'ILS',
     confidence: data.confidence || 'medium',
+    status: 'pending',
     morningCategoryId: data.morningCategoryId ?? null,
     morningCategoryName: data.morningCategoryName ?? null,
     morningCategoryCode: data.morningCategoryCode ?? null

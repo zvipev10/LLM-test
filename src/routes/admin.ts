@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { execute } from '../database/db';
+import { normalizeInvoiceStatus } from '../database/invoiceService';
 
 export const adminRouter = Router();
 
@@ -55,7 +56,7 @@ function normalizeInvoice(invoice: any) {
     vat: invoice.vat ?? null,
     currency: invoice.currency || 'ILS',
     confidence: invoice.confidence ?? null,
-    status: invoice.status || 'processed',
+    status: normalizeInvoiceStatus(invoice.status),
     printed: invoice.printed || 'לא',
     morningExpenseId: invoice.morningExpenseId ?? null,
     morningSyncStatus: invoice.morningSyncStatus ?? null,

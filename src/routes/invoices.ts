@@ -4,7 +4,7 @@ import { generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
-import { findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
+import { approveInvoices, findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
 import { logger } from '../logger';
 import { getMorningAccountingClassificationOptions, sendInvoiceToMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
 import { selectMorningCategoryForInvoice } from '../services/openai';
@@ -119,6 +119,7 @@ async function saveProcessedInvoiceResult(processed: any, index = 0) {
     vat: data.totalWithVat != null && data.totalWithoutVat != null ? data.totalWithVat - data.totalWithoutVat : undefined,
     currency: data.currency || 'ILS',
     confidence: data.confidence || 'medium',
+    status: 'pending',
     morningCategoryId: data.morningCategoryId ?? null,
     morningCategoryName: data.morningCategoryName ?? null,
     morningCategoryCode: data.morningCategoryCode ?? null
@@ -295,7 +296,7 @@ invoiceRouter.post(
 invoiceRouter.post('/save-batch', async (req: Request, res: Response) => {
   const startedAt = Date.now();
   try {
-    const { invoices } = req.body;
+    const { invoices, status } = req.body;
 
     if (!Array.isArray(invoices)) {
       return res.status(400).json({
@@ -304,7 +305,8 @@ invoiceRouter.post('/save-batch', async (req: Request, res: Response) => {
       });
     }
 
-    const existingInvoices = await getInvoices();
+    const statusScope = status === 'pending' || status === 'approved' ? status : undefined;
+    const existingInvoices = await getInvoices(statusScope);
     const existingIds = new Set(existingInvoices.map((inv: any) => inv.id));
     const incomingIds = new Set(invoices.filter((inv: any) => inv.id).map((inv: any) => inv.id));
 
@@ -347,6 +349,7 @@ invoiceRouter.post('/save-batch', async (req: Request, res: Response) => {
     logger.info({
       incomingCount: invoices.length,
       existingCount: existingInvoices.length,
+      statusScope: statusScope || 'all',
       savedCount,
       insertedCount,
       updatedCount,
@@ -382,8 +385,12 @@ invoiceRouter.get('/list', async (_req: Request, res: Response) => {
     res.set('Expires', '0');
     res.set('Surrogate-Control', 'no-store');
 
-    const invoices = await getInvoices();
+    const status = _req.query.status === 'pending' || _req.query.status === 'approved'
+      ? _req.query.status
+      : undefined;
+    const invoices = await getInvoices(status);
     logger.info({
+      status: status || 'all',
       count: invoices.length,
       durationMs: Date.now() - startedAt
     }, 'invoices listed');
@@ -400,6 +407,34 @@ invoiceRouter.get('/list', async (_req: Request, res: Response) => {
       success: false,
       error: error instanceof Error ? `${error.name}: ${error.message}` : String(error)
     });
+  }
+});
+
+invoiceRouter.post('/approve', async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  try {
+    const invoiceIds = Array.isArray(req.body?.invoiceIds)
+      ? req.body.invoiceIds
+          .map((id: unknown) => Number(id))
+          .filter((id: number) => Number.isInteger(id) && id > 0)
+      : [];
+
+    if (invoiceIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'invoiceIds must include at least one valid id' });
+    }
+
+    const approvedCount = await approveInvoices(invoiceIds);
+    return res.status(200).json({
+      success: true,
+      approvedCount
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({
+      error: errorMessage,
+      durationMs: Date.now() - startedAt
+    }, 'invoice approve failed');
+    return res.status(500).json({ success: false, error: errorMessage });
   }
 });
 

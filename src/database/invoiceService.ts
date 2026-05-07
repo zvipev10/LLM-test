@@ -83,6 +83,11 @@ function normalizeComparableValue(value: any) {
   return value;
 }
 
+export function normalizeInvoiceStatus(status?: string | null) {
+  if (status === 'pending' || status === 'approved') return status;
+  return 'approved';
+}
+
 export async function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): Promise<number> {
   const startedAt = Date.now();
   validateFileData(invoice, rowIndex);
@@ -117,7 +122,7 @@ export async function saveInvoice(invoice: InvoiceWithFile, rowIndex?: number): 
     invoice.currency || 'ILS',
     invoice.vat ?? null,
     invoice.confidence || null,
-    invoice.status || 'processed',
+    invoice.status || 'pending',
     invoice.printed || DEFAULT_PRINTED,
     invoice.morningCategoryId ?? null,
     invoice.morningCategoryName ?? null,
@@ -199,7 +204,7 @@ export async function hasInvoiceChanges(invoice: InvoiceWithFile): Promise<boole
     [existing.currency, invoice.currency || 'ILS'],
     [existing.vat, invoice.vat ?? null],
     [existing.confidence, invoice.confidence || null],
-    [existing.status, invoice.status || 'processed'],
+    [existing.status, normalizeInvoiceStatus(invoice.status)],
     [existing.printed, invoice.printed || DEFAULT_PRINTED],
     [existing.morningCategoryId, invoice.morningCategoryId ?? null],
     [existing.morningCategoryName, invoice.morningCategoryName ?? null],
@@ -249,7 +254,7 @@ export async function updateInvoice(invoice: InvoiceWithFile): Promise<boolean> 
     invoice.currency || 'ILS',
     invoice.vat ?? null,
     invoice.confidence || null,
-    invoice.status || 'processed',
+    normalizeInvoiceStatus(invoice.status),
     invoice.printed || DEFAULT_PRINTED,
     invoice.morningCategoryId ?? null,
     invoice.morningCategoryName ?? null,
@@ -326,17 +331,42 @@ export async function deleteInvoice(id: number): Promise<boolean> {
   return deleted;
 }
 
-export async function getInvoices(): Promise<StoredInvoice[]> {
+export async function approveInvoices(ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+
+  const startedAt = Date.now();
+  const values = [...ids];
+  const result = await execute(
+    `UPDATE invoices
+     SET status = 'approved',
+         "updatedAt" = CURRENT_TIMESTAMP
+     WHERE id IN (${placeholders(values.length)})`,
+    values
+  );
+  const approvedCount = result.rowCount ?? 0;
+  logger.info({
+    requestedCount: ids.length,
+    approvedCount,
+    durationMs: Date.now() - startedAt
+  }, 'invoices approved');
+  return approvedCount;
+}
+
+export async function getInvoices(status?: 'pending' | 'approved'): Promise<StoredInvoice[]> {
   const startedAt = Date.now();
   const selectedColumns = INVOICE_COLUMNS
     .filter((column) => column !== 'fileData')
     .map(quoteIdentifier)
     .join(', ');
 
+  const whereClause = status ? ' WHERE status = $1' : '';
+  const values = status ? [status] : [];
   const invoices = await query<StoredInvoice>(
-    `SELECT ${selectedColumns} FROM invoices ORDER BY date ASC NULLS LAST, "createdAt" ASC`
+    `SELECT ${selectedColumns} FROM invoices${whereClause} ORDER BY date ASC NULLS LAST, "createdAt" ASC`,
+    values
   );
   logger.info({
+    status: status || 'all',
     count: invoices.length,
     durationMs: Date.now() - startedAt
   }, 'invoices fetched');

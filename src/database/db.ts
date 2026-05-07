@@ -46,7 +46,7 @@ export async function initializeDatabase() {
         vat DOUBLE PRECISION,
         currency TEXT DEFAULT 'ILS',
         confidence TEXT,
-        status TEXT DEFAULT 'processed',
+        status TEXT DEFAULT 'approved',
         printed TEXT DEFAULT 'לא',
         "morningExpenseId" TEXT,
         "morningSyncStatus" TEXT,
@@ -81,6 +81,19 @@ export async function initializeDatabase() {
       SET "originalTotalWithVat" = "totalWithVat"
       WHERE "originalTotalWithVat" IS NULL
         AND "totalWithVat" IS NOT NULL;
+    `);
+
+    await getSql().query(`
+      UPDATE invoices
+      SET status = 'approved'
+      WHERE status IS NULL
+        OR status = ''
+        OR status = 'processed';
+    `);
+
+    await getSql().query(`
+      ALTER TABLE invoices
+      ALTER COLUMN status SET DEFAULT 'approved';
     `);
 
     logger.info({
