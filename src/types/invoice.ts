@@ -8,7 +8,6 @@ export interface InvoiceData {
   morningCategoryId?: string | null;
   morningCategoryName?: string | null;
   morningCategoryCode?: number | null;
-  confidence: 'high' | 'medium' | 'low';
 }
 
 export interface InvoiceResponse {

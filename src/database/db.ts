@@ -45,7 +45,6 @@ export async function initializeDatabase() {
         "totalWithoutVat" DOUBLE PRECISION,
         vat DOUBLE PRECISION,
         currency TEXT DEFAULT 'ILS',
-        confidence TEXT,
         status TEXT DEFAULT 'approved',
         printed TEXT DEFAULT 'לא',
         "morningExpenseId" TEXT,
@@ -81,6 +80,11 @@ export async function initializeDatabase() {
       SET "originalTotalWithVat" = "totalWithVat"
       WHERE "originalTotalWithVat" IS NULL
         AND "totalWithVat" IS NOT NULL;
+    `);
+
+    await getSql().query(`
+      ALTER TABLE invoices
+      DROP COLUMN IF EXISTS confidence;
     `);
 
     await getSql().query(`

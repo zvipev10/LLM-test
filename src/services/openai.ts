@@ -25,7 +25,6 @@ STAGE 2 - classify each useful value from stage 1 into the following fields:
 - date: best fit for the invoice date, not due date, payment date, or print date. Convert to ISO format (YYYY-MM-DD).
 - currency: if not explicitly stated, assume ILS.
 - Morning category: choose the single best category from the provided Morning category list according to the vendor, document text, invoice/receipt descriptions, and extracted values. Use only an id from this list. If no category reasonably fits, return null for all Morning category fields.
-- confidence: high, medium, or low.
 
 MORNING CATEGORY LIST:
 ${JSON.stringify(categoryList, null, 2)}
@@ -40,8 +39,7 @@ RESPOND WITH ONLY A VALID JSON OBJECT, NO OTHER TEXT, NO EXPLANATIONS:
   "currency": "ILS",
   "morningCategoryId": "category id from list or null",
   "morningCategoryName": "category name from list or null",
-  "morningCategoryCode": number,
-  "confidence": "high" | "medium" | "low"
+  "morningCategoryCode": number
 }`;
 }
 
