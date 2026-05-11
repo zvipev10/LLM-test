@@ -6,7 +6,7 @@ import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
 import { approveInvoices, findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, updateInvoiceFields, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
 import { logger } from '../logger';
-import { getMorningAccountingClassificationOptions, sendInvoiceToMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
+import { getMorningAccountingClassificationOptions, sendInvoiceToMorning, updateInvoiceInMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
 import { selectMorningCategoryForInvoice } from '../services/openai';
 import type { MorningAccountingClassificationOption } from '../services/morningClient';
 
@@ -664,7 +664,7 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
       try {
         const existingExpenseId = invoice.morningSyncStatus === 'sent' ? invoice.morningExpenseId : null;
         const morningResult = existingExpenseId
-          ? { expenseId: existingExpenseId, response: null }
+          ? await updateInvoiceInMorning(invoice, existingExpenseId)
           : await sendInvoiceToMorning(invoice);
         const expenseId = morningResult.expenseId;
 
@@ -672,9 +672,7 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
           throw new Error('Morning did not return an expense ID');
         }
 
-        if (!existingExpenseId) {
-          await updateMorningSyncStatus(id, 'sent', expenseId, null);
-        }
+        await updateMorningSyncStatus(id, 'sent', expenseId, null);
 
         let morningFileSyncStatus: MorningSyncResult['morningFileSyncStatus'] = invoice.morningFileSyncStatus as MorningSyncResult['morningFileSyncStatus'] || null;
         let morningFileSyncError: string | null = null;
@@ -712,14 +710,14 @@ invoiceRouter.post('/send-to-morning', async (req: Request, res: Response) => {
         results.push({
           invoiceId: id,
           success: true,
-          skipped: Boolean(existingExpenseId),
+          skipped: false,
           morningExpenseId: expenseId,
           morningFileSyncStatus,
           morningFileSyncError
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        await updateMorningSyncStatus(id, 'failed', null, errorMessage);
+        await updateMorningSyncStatus(id, 'failed', invoice.morningExpenseId ?? null, errorMessage);
         logger.error({
           invoiceId: id,
           error: errorMessage

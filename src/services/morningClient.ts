@@ -208,6 +208,56 @@ function getExpenseId(response: MorningExpenseResponse) {
   return null;
 }
 
+async function buildMorningExpensePayload(invoice: StoredInvoice) {
+  if (!invoice.id) {
+    throw new Error('Invoice must be saved before sending to Morning');
+  }
+  if (!invoice.vendorName) {
+    throw new Error('Invoice supplier is required before sending to Morning');
+  }
+  if (invoice.totalWithVat == null) {
+    throw new Error('Invoice total is required before sending to Morning');
+  }
+  if (!invoice.morningCategoryId) {
+    throw new Error('Morning category is required before sending invoice');
+  }
+
+  const invoiceDate = formatDate(invoice.date);
+  const accountingClassification = await getExpenseAccountingClassification(invoice.morningCategoryId);
+  logger.info({
+    invoiceId: invoice.id,
+    classificationId: accountingClassification.id,
+    classificationKey: accountingClassification.key,
+    classificationCode: accountingClassification.code,
+    classificationTitle: accountingClassification.title,
+    classificationIrsCode: accountingClassification.irsCode
+  }, 'morning accounting classification prepared for expense');
+
+  return {
+    paymentType: Number(process.env.GREEN_INVOICE_EXPENSE_PAYMENT_TYPE || 11),
+    currency: invoice.currency || 'ILS',
+    currencyRate: 1,
+    vat: formatAmount(invoice.vat),
+    amount: formatAmount(invoice.totalWithVat),
+    date: invoiceDate,
+    dueDate: invoiceDate,
+    reportingDate: invoiceDate.slice(0, 7) + '-01',
+    documentType: Number(process.env.GREEN_INVOICE_EXPENSE_DOCUMENT_TYPE || 20),
+    number: String(invoice.id),
+    description: 'חסר',
+    remarks: `Imported from VAT Report invoice ${invoice.id}`,
+    supplier: {
+      name: invoice.vendorName,
+      active: true,
+      country: 'IL'
+    },
+    accountingClassification,
+    active: true,
+    addRecipient: true,
+    addAccountingClassification: true
+  };
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -329,54 +379,8 @@ async function getExpenseAccountingClassification(categoryId: string) {
 }
 
 export async function sendInvoiceToMorning(invoice: StoredInvoice) {
-  if (!invoice.id) {
-    throw new Error('Invoice must be saved before sending to Morning');
-  }
-  if (!invoice.vendorName) {
-    throw new Error('Invoice supplier is required before sending to Morning');
-  }
-  if (invoice.totalWithVat == null) {
-    throw new Error('Invoice total is required before sending to Morning');
-  }
-  if (!invoice.morningCategoryId) {
-    throw new Error('Morning category is required before sending invoice');
-  }
-
   const startedAt = Date.now();
-  const invoiceDate = formatDate(invoice.date);
-  const accountingClassification = await getExpenseAccountingClassification(invoice.morningCategoryId);
-  logger.info({
-    invoiceId: invoice.id,
-    classificationId: accountingClassification.id,
-    classificationKey: accountingClassification.key,
-    classificationCode: accountingClassification.code,
-    classificationTitle: accountingClassification.title,
-    classificationIrsCode: accountingClassification.irsCode
-  }, 'morning accounting classification prepared for expense');
-
-  const payload = {
-    paymentType: Number(process.env.GREEN_INVOICE_EXPENSE_PAYMENT_TYPE || 11),
-    currency: invoice.currency || 'ILS',
-    currencyRate: 1,
-    vat: formatAmount(invoice.vat),
-    amount: formatAmount(invoice.totalWithVat),
-    date: invoiceDate,
-    dueDate: invoiceDate,
-    reportingDate: invoiceDate.slice(0, 7) + '-01',
-    documentType: Number(process.env.GREEN_INVOICE_EXPENSE_DOCUMENT_TYPE || 20),
-    number: String(invoice.id),
-    description: 'חסר',
-    remarks: `Imported from VAT Report invoice ${invoice.id}`,
-    supplier: {
-      name: invoice.vendorName,
-      active: true,
-      country: 'IL'
-    },
-    accountingClassification,
-    active: true,
-    addRecipient: true,
-    addAccountingClassification: true
-  };
+  const payload = await buildMorningExpensePayload(invoice);
 
   let response: MorningExpenseResponse;
   try {
@@ -417,6 +421,57 @@ export async function sendInvoiceToMorning(invoice: StoredInvoice) {
 
   return {
     expenseId,
+    response
+  };
+}
+
+export async function updateInvoiceInMorning(invoice: StoredInvoice, expenseId: string) {
+  if (!expenseId) {
+    throw new Error('Morning expense ID is required before updating invoice');
+  }
+
+  const startedAt = Date.now();
+  const payload = await buildMorningExpensePayload(invoice);
+
+  let response: MorningExpenseResponse;
+  try {
+    response = await requestMorning<MorningExpenseResponse>(`/expenses/${encodeURIComponent(expenseId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  } catch (error) {
+    logger.error({
+      invoiceId: invoice.id,
+      expenseId,
+      vendorName: invoice.vendorName,
+      date: invoice.date,
+      totalWithVat: invoice.totalWithVat,
+      totalWithoutVat: invoice.totalWithoutVat,
+      vat: invoice.vat,
+      morningCategoryId: invoice.morningCategoryId,
+      payload,
+      morningError: error instanceof MorningApiError
+        ? {
+            message: error.message,
+            status: error.status,
+            path: error.path,
+            body: error.body
+          }
+        : {
+            message: error instanceof Error ? error.message : String(error)
+          }
+    }, 'morning expense update request failed');
+    throw error;
+  }
+
+  logger.info({
+    invoiceId: invoice.id,
+    expenseId,
+    durationMs: Date.now() - startedAt
+  }, 'invoice updated in morning');
+
+  return {
+    expenseId: getExpenseId(response) || expenseId,
     response
   };
 }
