@@ -441,6 +441,138 @@ export async function getInvoices(status?: 'pending' | 'approved'): Promise<Stor
   return invoices;
 }
 
+export type InvoiceListFilters = {
+  status?: 'pending' | 'approved';
+  vendor?: string;
+  fromDate?: string;
+  toDate?: string;
+  page?: number;
+  pageSize?: number;
+};
+
+export type InvoiceListTotals = {
+  totalWithoutVat: number;
+  vat: number;
+  totalWithVat: number;
+};
+
+export type InvoiceListPage = {
+  invoices: StoredInvoice[];
+  totalCount: number;
+  unfilteredCount: number;
+  totals: InvoiceListTotals;
+  page: number;
+  pageSize: number;
+};
+
+function buildInvoiceListWhere(filters: InvoiceListFilters) {
+  const clauses: string[] = [];
+  const values: unknown[] = [];
+
+  const addValue = (value: unknown) => {
+    values.push(value);
+    return `$${values.length}`;
+  };
+
+  if (filters.status) {
+    clauses.push(`status = ${addValue(filters.status)}`);
+  }
+
+  const vendor = filters.vendor?.trim();
+  if (vendor) {
+    clauses.push(`LOWER(COALESCE("vendorName", '')) LIKE LOWER(${addValue(`%${vendor}%`)})`);
+  }
+
+  if (filters.fromDate) {
+    clauses.push(`date >= ${addValue(filters.fromDate)}`);
+  }
+
+  if (filters.toDate) {
+    clauses.push(`date <= ${addValue(filters.toDate)}`);
+  }
+
+  return {
+    whereClause: clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '',
+    values
+  };
+}
+
+function normalizePositiveInteger(value: number | undefined, fallback: number, max?: number) {
+  if (!Number.isFinite(value) || !value || value < 1) return fallback;
+  const normalized = Math.floor(value);
+  return max ? Math.min(normalized, max) : normalized;
+}
+
+export async function getInvoicesPage(filters: InvoiceListFilters): Promise<InvoiceListPage> {
+  const startedAt = Date.now();
+  const selectedColumns = INVOICE_COLUMNS
+    .filter((column) => column !== 'fileData')
+    .map(quoteIdentifier)
+    .join(', ');
+  const page = normalizePositiveInteger(filters.page, 1);
+  const pageSize = normalizePositiveInteger(filters.pageSize, 50, 100);
+  const offset = (page - 1) * pageSize;
+  const { whereClause, values } = buildInvoiceListWhere(filters);
+
+  const invoices = await query<StoredInvoice>(
+    `SELECT ${selectedColumns}
+     FROM invoices${whereClause}
+     ORDER BY date DESC NULLS LAST, "createdAt" DESC
+     LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+    [...values, pageSize, offset]
+  );
+
+  const summaryRows = await query<{
+    totalCount: string | number;
+    totalWithoutVat: string | number | null;
+    vat: string | number | null;
+    totalWithVat: string | number | null;
+  }>(
+    `SELECT
+       COUNT(*) AS "totalCount",
+       COALESCE(SUM("totalWithoutVat"), 0) AS "totalWithoutVat",
+       COALESCE(SUM(vat), 0) AS vat,
+       COALESCE(SUM("totalWithVat"), 0) AS "totalWithVat"
+     FROM invoices${whereClause}`,
+    values
+  );
+  const summary = summaryRows[0] || {};
+  const baseWhere = filters.status ? ' WHERE status = $1' : '';
+  const baseValues = filters.status ? [filters.status] : [];
+  const baseCountRows = await query<{ count: string | number }>(
+    `SELECT COUNT(*) AS count FROM invoices${baseWhere}`,
+    baseValues
+  );
+
+  const result = {
+    invoices,
+    totalCount: Number(summary.totalCount || 0),
+    unfilteredCount: Number(baseCountRows[0]?.count || 0),
+    totals: {
+      totalWithoutVat: Number(summary.totalWithoutVat || 0),
+      vat: Number(summary.vat || 0),
+      totalWithVat: Number(summary.totalWithVat || 0)
+    },
+    page,
+    pageSize
+  };
+
+  logger.info({
+    status: filters.status || 'all',
+    vendor: filters.vendor || null,
+    fromDate: filters.fromDate || null,
+    toDate: filters.toDate || null,
+    page,
+    pageSize,
+    count: invoices.length,
+    totalCount: result.totalCount,
+    unfilteredCount: result.unfilteredCount,
+    durationMs: Date.now() - startedAt
+  }, 'invoices page fetched');
+
+  return result;
+}
+
 export async function getInvoiceFileData(id: number) {
   const rows = await query<{ fileData?: string; mimeType?: string | null }>(
     'SELECT "fileData", "mimeType" FROM invoices WHERE id = $1',

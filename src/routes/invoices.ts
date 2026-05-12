@@ -4,7 +4,7 @@ import { generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
-import { approveInvoices, findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, updateInvoiceFields, deleteInvoice, hasInvoiceChanges, resetAllMorningSyncStatuses, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
+import { approveInvoices, findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, getInvoicesPage, saveInvoice, updateInvoice, updateInvoiceFields, deleteInvoice, hasInvoiceChanges, resetAllMorningSyncStatuses, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
 import { logger } from '../logger';
 import { getMorningAccountingClassificationOptions, sendInvoiceToMorning, updateInvoiceInMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
 import { selectMorningCategoryForInvoice } from '../services/openai';
@@ -401,6 +401,41 @@ invoiceRouter.get('/list', async (_req: Request, res: Response) => {
     const status = _req.query.status === 'pending' || _req.query.status === 'approved'
       ? _req.query.status
       : undefined;
+    const page = typeof _req.query.page === 'string' ? Number(_req.query.page) : undefined;
+    const pageSize = typeof _req.query.pageSize === 'string' ? Number(_req.query.pageSize) : undefined;
+    const vendor = typeof _req.query.vendor === 'string' ? _req.query.vendor.trim() : undefined;
+    const fromDate = typeof _req.query.fromDate === 'string' ? _req.query.fromDate : undefined;
+    const toDate = typeof _req.query.toDate === 'string' ? _req.query.toDate : undefined;
+    const usePagedList = Number.isFinite(page) || Number.isFinite(pageSize) || Boolean(vendor || fromDate || toDate);
+
+    if (usePagedList) {
+      const listPage = await getInvoicesPage({
+        status,
+        vendor,
+        fromDate,
+        toDate,
+        page,
+        pageSize
+      });
+      logger.info({
+        status: status || 'all',
+        count: listPage.invoices.length,
+        totalCount: listPage.totalCount,
+        page: listPage.page,
+        pageSize: listPage.pageSize,
+        durationMs: Date.now() - startedAt
+      }, 'invoices listed');
+      return res.status(200).json({
+        success: true,
+        invoices: listPage.invoices,
+        page: listPage.page,
+        pageSize: listPage.pageSize,
+        totalCount: listPage.totalCount,
+        unfilteredCount: listPage.unfilteredCount,
+        totals: listPage.totals
+      });
+    }
+
     const invoices = await getInvoices(status);
     logger.info({
       status: status || 'all',
