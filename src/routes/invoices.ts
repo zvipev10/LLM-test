@@ -516,6 +516,118 @@ invoiceRouter.get('/morning/accounting-classifications', async (_req: Request, r
   }
 });
 
+invoiceRouter.post('/morning/refresh-category-names', async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  try {
+    const { invoiceIds, dryRun = false } = req.body || {};
+
+    if (invoiceIds !== undefined && !Array.isArray(invoiceIds)) {
+      return res.status(400).json({
+        success: false,
+        error: 'invoiceIds must be an array when provided'
+      });
+    }
+
+    const requestedIds = Array.isArray(invoiceIds)
+      ? new Set(
+        invoiceIds
+          .map((id: unknown) => Number(id))
+          .filter((id: number) => Number.isInteger(id) && id > 0)
+      )
+      : null;
+
+    if (Array.isArray(invoiceIds) && requestedIds?.size === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid invoice IDs were provided'
+      });
+    }
+
+    const categories = await getMorningAccountingClassificationOptions(true);
+    const categoriesById = new Map(categories.map((category) => [category.id, category]));
+    const invoices = (await getInvoices())
+      .filter((invoice) => !requestedIds || requestedIds.has(Number(invoice.id)))
+      .filter((invoice) => Boolean(invoice.morningCategoryId));
+
+    const results: CategoryRefreshResult[] = [];
+
+    for (const invoice of invoices) {
+      if (!invoice.id) continue;
+
+      const oldCategory = {
+        oldCategoryId: invoice.morningCategoryId ?? null,
+        oldCategoryName: invoice.morningCategoryName ?? null,
+        oldCategoryCode: invoice.morningCategoryCode ?? null
+      };
+      const currentCategory = invoice.morningCategoryId
+        ? categoriesById.get(invoice.morningCategoryId)
+        : null;
+
+      if (!currentCategory) {
+        results.push({
+          invoiceId: invoice.id,
+          success: true,
+          skipped: true,
+          ...oldCategory,
+          changed: false,
+          error: 'Morning category ID was not found in current Morning categories'
+        });
+        continue;
+      }
+
+      const nextCategory = toStoredMorningCategory(currentCategory);
+      const changed =
+        (invoice.morningCategoryName ?? null) !== nextCategory.morningCategoryName ||
+        (invoice.morningCategoryCode ?? null) !== nextCategory.morningCategoryCode;
+
+      if (!dryRun && changed) {
+        await updateInvoiceMorningCategory(invoice.id, nextCategory);
+      }
+
+      results.push({
+        invoiceId: invoice.id,
+        success: true,
+        ...oldCategory,
+        ...nextCategory,
+        changed
+      });
+    }
+
+    const updatedCount = results.filter((result) => result.success && result.changed).length;
+    const missingCount = results.filter((result) => result.skipped).length;
+
+    logger.info({
+      requestedCount: requestedIds?.size ?? null,
+      processedCount: results.length,
+      updatedCount,
+      missingCount,
+      dryRun: Boolean(dryRun),
+      categoryCount: categories.length,
+      durationMs: Date.now() - startedAt
+    }, 'invoice morning category names refreshed');
+
+    return res.status(200).json({
+      success: true,
+      processedCount: results.length,
+      updatedCount,
+      missingCount,
+      dryRun: Boolean(dryRun),
+      results
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({
+      error: errorMessage,
+      durationMs: Date.now() - startedAt
+    }, 'invoice morning category names refresh failed');
+
+    return res.status(500).json({
+      success: false,
+      error: errorMessage
+    });
+  }
+});
+
 invoiceRouter.post('/morning/reclassify-categories', async (req: Request, res: Response) => {
   const startedAt = Date.now();
   try {
