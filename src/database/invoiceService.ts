@@ -365,6 +365,27 @@ export async function updateInvoiceMorningCategory(
   return updated;
 }
 
+export async function resetAllMorningSyncStatuses(): Promise<number> {
+  const startedAt = Date.now();
+  const result = await execute(
+    `UPDATE invoices
+     SET "morningExpenseId" = NULL,
+         "morningSyncStatus" = NULL,
+         "morningSyncedAt" = NULL,
+         "morningSyncError" = NULL,
+         "morningFileSyncStatus" = NULL,
+         "morningFileSyncedAt" = NULL,
+         "morningFileSyncError" = NULL,
+         "updatedAt" = CURRENT_TIMESTAMP`
+  );
+  const resetCount = result.rowCount ?? 0;
+  logger.info({
+    resetCount,
+    durationMs: Date.now() - startedAt
+  }, 'invoice morning sync statuses reset');
+  return resetCount;
+}
+
 export async function deleteInvoice(id: number): Promise<boolean> {
   const startedAt = Date.now();
   const result = await execute('DELETE FROM invoices WHERE id = $1', [id]);

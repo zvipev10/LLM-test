@@ -4,7 +4,7 @@ import { generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
-import { approveInvoices, findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, updateInvoiceFields, deleteInvoice, hasInvoiceChanges, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
+import { approveInvoices, findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, saveInvoice, updateInvoice, updateInvoiceFields, deleteInvoice, hasInvoiceChanges, resetAllMorningSyncStatuses, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
 import { logger } from '../logger';
 import { getMorningAccountingClassificationOptions, sendInvoiceToMorning, updateInvoiceInMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
 import { selectMorningCategoryForInvoice } from '../services/openai';
@@ -31,6 +31,20 @@ type MorningSyncResult = {
 };
 
 type CategoryRefreshResult = {
+  invoiceId: number;
+  success: boolean;
+  skipped?: boolean;
+  oldCategoryId?: string | null;
+  oldCategoryName?: string | null;
+  oldCategoryCode?: number | null;
+  morningCategoryId?: string | null;
+  morningCategoryName?: string | null;
+  morningCategoryCode?: number | null;
+  changed?: boolean;
+  error?: string;
+};
+
+type MorningEnvironmentMigrationResult = {
   invoiceId: number;
   success: boolean;
   skipped?: boolean;
@@ -733,6 +747,131 @@ invoiceRouter.post('/morning/reclassify-categories', async (req: Request, res: R
       error: errorMessage,
       durationMs: Date.now() - startedAt
     }, 'invoice morning categories reclassification batch failed');
+    return res.status(500).json({
+      success: false,
+      error: errorMessage
+    });
+  }
+});
+
+invoiceRouter.post('/morning/migrate-environment', async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+  try {
+    const dryRun = req.body?.dryRun !== false;
+    const categories = await getMorningAccountingClassificationOptions(true);
+    const categoryNames = new Map<string, MorningAccountingClassificationOption[]>();
+
+    for (const category of categories) {
+      const name = category.name?.trim();
+      if (!name) continue;
+      const matches = categoryNames.get(name) || [];
+      matches.push(category);
+      categoryNames.set(name, matches);
+    }
+
+    const invoices = await getInvoices();
+    const results: MorningEnvironmentMigrationResult[] = [];
+
+    for (const invoice of invoices) {
+      if (!invoice.id) continue;
+
+      const oldCategory = {
+        oldCategoryId: invoice.morningCategoryId ?? null,
+        oldCategoryName: invoice.morningCategoryName ?? null,
+        oldCategoryCode: invoice.morningCategoryCode ?? null
+      };
+      const categoryName = invoice.morningCategoryName?.trim();
+
+      if (!categoryName) {
+        results.push({
+          invoiceId: invoice.id,
+          success: true,
+          skipped: true,
+          ...oldCategory,
+          changed: false,
+          error: 'Invoice does not have a Morning category name'
+        });
+        continue;
+      }
+
+      const matches = categoryNames.get(categoryName) || [];
+      if (matches.length === 0) {
+        results.push({
+          invoiceId: invoice.id,
+          success: true,
+          skipped: true,
+          ...oldCategory,
+          changed: false,
+          error: 'No exact Morning category name match was found'
+        });
+        continue;
+      }
+
+      if (matches.length > 1) {
+        results.push({
+          invoiceId: invoice.id,
+          success: true,
+          skipped: true,
+          ...oldCategory,
+          changed: false,
+          error: 'More than one Morning category has this exact name'
+        });
+        continue;
+      }
+
+      const nextCategory = toStoredMorningCategory(matches[0]);
+      const changed =
+        (invoice.morningCategoryId ?? null) !== nextCategory.morningCategoryId ||
+        (invoice.morningCategoryCode ?? null) !== nextCategory.morningCategoryCode ||
+        (invoice.morningCategoryName ?? null) !== nextCategory.morningCategoryName;
+
+      if (!dryRun && changed) {
+        await updateInvoiceMorningCategory(invoice.id, nextCategory);
+      }
+
+      results.push({
+        invoiceId: invoice.id,
+        success: true,
+        ...oldCategory,
+        ...nextCategory,
+        changed
+      });
+    }
+
+    let syncResetCount = invoices.length;
+    if (!dryRun) {
+      syncResetCount = await resetAllMorningSyncStatuses();
+    }
+
+    const changedCategoryCount = results.filter((result) => result.success && result.changed).length;
+    const skippedCategoryCount = results.filter((result) => result.skipped).length;
+
+    logger.info({
+      dryRun,
+      invoiceCount: invoices.length,
+      categoryCount: categories.length,
+      syncResetCount,
+      changedCategoryCount,
+      skippedCategoryCount,
+      durationMs: Date.now() - startedAt
+    }, 'morning environment migration completed');
+
+    return res.status(200).json({
+      success: true,
+      dryRun,
+      invoiceCount: invoices.length,
+      categoryCount: categories.length,
+      syncResetCount,
+      changedCategoryCount,
+      skippedCategoryCount,
+      results
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({
+      error: errorMessage,
+      durationMs: Date.now() - startedAt
+    }, 'morning environment migration failed');
     return res.status(500).json({
       success: false,
       error: errorMessage
