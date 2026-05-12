@@ -409,7 +409,7 @@ export async function getInvoices(status?: 'pending' | 'approved'): Promise<Stor
   const whereClause = status ? ' WHERE status = $1' : '';
   const values = status ? [status] : [];
   const invoices = await query<StoredInvoice>(
-    `SELECT ${selectedColumns} FROM invoices${whereClause} ORDER BY date ASC NULLS LAST, "createdAt" ASC`,
+    `SELECT ${selectedColumns} FROM invoices${whereClause} ORDER BY date DESC NULLS LAST, "createdAt" DESC`,
     values
   );
   logger.info({
