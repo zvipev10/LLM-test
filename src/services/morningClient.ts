@@ -166,6 +166,7 @@ async function getMorningToken() {
     {
       method: 'POST',
       body: JSON.stringify({
+        grant_type: 'client_credentials',
         id: getRequiredEnv('GREEN_INVOICE_API_ID'),
         secret: getRequiredEnv('GREEN_INVOICE_API_SECRET')
       })
