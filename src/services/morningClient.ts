@@ -122,6 +122,14 @@ async function requestMorning<T>(path: string, options: RequestInit = {}, useAut
 
   const body = await parseJsonResponse(response);
   if (!response.ok) {
+    logger.error({
+      apiBase: getApiBase(),
+      path,
+      method: options.method || 'GET',
+      status: response.status,
+      body
+    }, 'morning api request failed');
+
     const message =
       typeof body === 'object' && body !== null && 'message' in body
         ? String((body as { message?: unknown }).message)
