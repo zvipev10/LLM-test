@@ -4,7 +4,7 @@ import { generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 import { upload } from '../middleware/upload';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { ErrorResponse } from '../types/invoice';
-import { approveInvoices, findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, getInvoicesPage, saveInvoice, updateInvoice, updateInvoiceFields, deleteInvoice, hasInvoiceChanges, resetAllMorningSyncStatuses, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
+import { approveInvoices, findDuplicateInvoice, getInvoices, getInvoiceById, getInvoiceFileData, getInvoicesPage, saveInvoice, updateInvoiceFields, deleteInvoice, resetAllMorningSyncStatuses, updateMorningSyncStatus, updateMorningFileSyncStatus, updateInvoiceMorningCategory } from '../database/invoiceService';
 import { logger } from '../logger';
 import { getMorningAccountingClassificationOptions, sendInvoiceToMorning, updateInvoiceInMorning, uploadInvoiceFileToMorningExpense } from '../services/morningClient';
 import { selectMorningCategoryForInvoice } from '../services/openai';
@@ -99,14 +99,15 @@ function inferInvoiceContentType(fileName: string, fallback?: string | null) {
 
 async function saveProcessedInvoiceResult(processed: any, index = 0) {
   const { fileData, data, filename, mimeType, ...rest } = processed;
-  const duplicate = await findDuplicateInvoice(data.date, data.totalWithVat);
+  const originalTotalWithVat = data.originalTotalWithVat ?? data.totalWithVat;
+  const duplicate = await findDuplicateInvoice(data.date, originalTotalWithVat);
 
   if (duplicate) {
     logger.info({
       filename,
       duplicateInvoiceId: duplicate.id,
       date: data.date,
-      totalWithVat: data.totalWithVat
+      originalTotalWithVat
     }, 'duplicate invoice skipped before insert');
 
     return {
@@ -305,90 +306,6 @@ invoiceRouter.post(
     }
   }
 );
-
-invoiceRouter.post('/save-batch', async (req: Request, res: Response) => {
-  const startedAt = Date.now();
-  try {
-    const { invoices, status } = req.body;
-
-    if (!Array.isArray(invoices)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid invoices data'
-      });
-    }
-
-    const statusScope = status === 'pending' || status === 'approved' ? status : undefined;
-    const existingInvoices = await getInvoices(statusScope);
-    const existingIds = new Set(existingInvoices.map((inv: any) => inv.id));
-    const incomingIds = new Set(invoices.filter((inv: any) => inv.id).map((inv: any) => inv.id));
-
-    let deletedCount = 0;
-
-    for (const id of existingIds) {
-      if (!incomingIds.has(id)) {
-        const deleted = await deleteInvoice(id);
-        if (deleted) deletedCount += 1;
-      }
-    }
-
-    const ids: number[] = [];
-    let savedCount = 0;
-    let updatedCount = 0;
-    let insertedCount = 0;
-    let unchangedCount = 0;
-
-    for (const [idx, invoice] of invoices.entries()) {
-      if (invoice.id) {
-        const hasChanges = await hasInvoiceChanges(invoice);
-        if (hasChanges) {
-          const updated = await updateInvoice(invoice);
-          if (updated) {
-            ids.push(invoice.id);
-            savedCount += 1;
-            updatedCount += 1;
-          }
-        } else {
-          unchangedCount += 1;
-        }
-      } else {
-        const id = await saveInvoice(invoice, idx);
-        ids.push(id);
-        savedCount += 1;
-        insertedCount += 1;
-      }
-    }
-
-    logger.info({
-      incomingCount: invoices.length,
-      existingCount: existingInvoices.length,
-      statusScope: statusScope || 'all',
-      savedCount,
-      insertedCount,
-      updatedCount,
-      unchangedCount,
-      deletedCount,
-      durationMs: Date.now() - startedAt
-    }, 'invoice batch saved');
-
-    return res.status(200).json({
-      success: true,
-      message: `Database synced: ${savedCount} saved/updated, ${deletedCount} deleted`,
-      savedCount,
-      deletedCount
-    });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error({
-      error: errorMessage,
-      durationMs: Date.now() - startedAt
-    }, 'invoice batch save failed');
-    return res.status(500).json({
-      success: false,
-      error: errorMessage
-    });
-  }
-});
 
 invoiceRouter.get('/list', async (_req: Request, res: Response) => {
   const startedAt = Date.now();

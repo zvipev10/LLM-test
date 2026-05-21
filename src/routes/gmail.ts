@@ -27,14 +27,15 @@ async function saveProcessedInvoice(processed: any) {
   if (!processed.success) return processed;
 
   const { fileData, data, filename, mimeType, ...rest } = processed;
-  const duplicate = await findDuplicateInvoice(data.date, data.totalWithVat);
+  const originalTotalWithVat = data.originalTotalWithVat ?? data.totalWithVat;
+  const duplicate = await findDuplicateInvoice(data.date, originalTotalWithVat);
 
   if (duplicate) {
     logger.info({
       filename,
       duplicateInvoiceId: duplicate.id,
       date: data.date,
-      totalWithVat: data.totalWithVat
+      originalTotalWithVat
     }, 'duplicate gmail invoice skipped before insert');
 
     return {
