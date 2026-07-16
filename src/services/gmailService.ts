@@ -37,6 +37,17 @@ async function saveTokens(nextTokens: any) {
   logger.info('gmail tokens persisted')
 }
 
+export async function clearStoredTokens() {
+  tokens = null
+  await execute('DELETE FROM app_settings WHERE key = $1', ['gmail_tokens'])
+  logger.info('gmail tokens cleared')
+}
+
+export function isGmailAuthError(error: any) {
+  const message = error?.message || error?.response?.data?.error || ''
+  return message === 'invalid_grant' || message === 'Gmail not connected'
+}
+
 async function ensureTokensLoaded() {
   if (tokens) return tokens
 

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, createSimplePdfBuffer } from '../services/gmailService';
+import { clearStoredTokens, getAuthUrl, handleOAuthCallback, fetchEmails, downloadAttachment, createSimplePdfBuffer, isGmailAuthError } from '../services/gmailService';
 import { processInvoiceFile } from '../services/processInvoiceFile';
 import { resolveGmailInvoiceSource } from '../services/openai';
 import { renderHtmlToPdf } from '../services/browserRenderer';
@@ -258,7 +258,8 @@ gmailRouter.post('/sync', async (req, res) => {
 
     res.json({ success: true, total: results.length, results });
   } catch (err: any) {
-    if (err?.message === 'Gmail not connected') {
+    if (isGmailAuthError(err)) {
+      await clearStoredTokens();
       return res.status(401).json({ success: false, error: 'Gmail not connected' });
     }
     res.status(500).json({ success: false, error: err.message });
