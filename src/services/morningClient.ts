@@ -2,8 +2,7 @@ import type { StoredInvoice } from '../database/invoiceService';
 import { logger } from '../logger';
 
 type MorningTokenResponse = {
-  token?: string;
-  expires?: number;
+  accessToken?: string;
   expiresAt?: number;
 };
 
@@ -169,28 +168,31 @@ async function getMorningToken() {
   }
 
   const startedAt = Date.now();
-  const tokenResponse = await requestMorning<MorningTokenResponse>(
-    '/account/token',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        id: getRequiredEnv('GREEN_INVOICE_API_ID'),
-        secret: getRequiredEnv('GREEN_INVOICE_API_SECRET')
-      })
-    },
-    false
-  );
+  const tokenUrl = process.env.GREEN_INVOICE_AUTH_URL || (getApiBase().includes('sandbox')
+    ? 'https://api.sandbox.morning.dev/idp/v1/oauth/token'
+    : 'https://api.morning.co/idp/v1/oauth/token');
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grant_type: 'client_credentials',
+      client_id: getRequiredEnv('GREEN_INVOICE_API_ID'),
+      client_secret: getRequiredEnv('GREEN_INVOICE_API_SECRET')
+    })
+  });
+  const tokenResponse = await parseJsonResponse(response) as MorningTokenResponse & { error?: string };
+  if (!response.ok) {
+    throw new MorningApiError(`Morning authentication failed (${response.status}): ${tokenResponse.error || 'unknown error'}`, response.status, '/idp/v1/oauth/token', tokenResponse);
+  }
 
-  if (!tokenResponse.token) {
+  if (!tokenResponse.accessToken) {
     throw new Error('Morning API did not return an auth token');
   }
 
-  cachedToken = tokenResponse.token;
+  cachedToken = tokenResponse.accessToken;
   const tokenExpiry =
     typeof tokenResponse.expiresAt === 'number'
-      ? tokenResponse.expiresAt
-      : typeof tokenResponse.expires === 'number'
-        ? Date.now() + tokenResponse.expires * 1000
+      ? tokenResponse.expiresAt * 1000
         : Date.now() + 50 * 60 * 1000;
   cachedTokenExpiresAt = tokenExpiry;
 
