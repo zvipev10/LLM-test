@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "dist/app.js",
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "scripts": {
     "build": "tsc",
